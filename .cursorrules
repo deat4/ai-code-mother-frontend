@@ -1,0 +1,32 @@
+# Cursor Rules
+
+## Vue 3 代码规范
+
+生成前端 Vue 代码时，使用 Vue 3 的组合式 API 语法（Composition API）。
+
+### 示例
+
+```vue
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+
+interface Props {
+  title: string
+}
+
+const props = defineProps<Props>()
+const count = ref(0)
+const doubled = computed(() => count.value * 2)
+</script>
+
+<template>
+  <div>{{ props.title }}: {{ doubled }}</div>
+</template>
+```
+
+### 要求
+
+- 始终使用 `<script setup lang="ts">` 语法
+- 使用 `ref`、`reactive`、`computed` 等组合式 API
+- 使用 `defineProps<T>()` 和 `defineEmits<T>()` 定义组件接口
+- 避免使用 Options API（data、methods、computed 等选项）
