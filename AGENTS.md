@@ -10,6 +10,7 @@ Guidelines for AI coding agents working in this Vue 3 + TypeScript + Vite projec
 - **State Management**: Pinia (setup stores pattern)
 - **Router**: Vue Router 5
 - **UI Library**: Ant Design Vue 4
+- **HTTP Client**: Axios
 
 ## Commands
 
@@ -31,11 +32,10 @@ npm run lint:eslint      # eslint . --fix --cache
 
 # Formatting
 npm run format           # prettier --write src/
+
+# API Code Generation
+npm run openapi2ts       # Generate API code from OpenAPI spec
 ```
-
-### Single Test
-
-This project does not currently have a test framework configured. If tests are added, check `package.json` for the test command.
 
 ## Code Style
 
@@ -64,7 +64,7 @@ This project does not currently have a test framework configured. If tests are a
 
 ```typescript
 import MyComponent from '@/components/MyComponent.vue'
-import { useCounterStore } from '@/stores/counter'
+import { useLoginUserStore } from '@/stores/loginUser'
 ```
 
 - Import order: Vue core → third-party → local (separated by blank lines)
@@ -82,6 +82,7 @@ import router from '@/router'
 - `noUncheckedIndexedAccess: true` - array/object access may return undefined
 - Always define types for props, emits, and function parameters
 - Avoid `any`; use `unknown` with type guards when type is uncertain
+- Use API types from `@/api` for backend data structures
 
 ### Vue Components
 
@@ -148,9 +149,8 @@ export const useExampleStore = defineStore('example', () => {
 ```typescript
 try {
   await fetchData()
-} catch (error) {
-  console.error('Failed to fetch data:', error)
-  throw error
+} catch {
+  console.error('Failed to fetch data')
 }
 ```
 
@@ -171,15 +171,58 @@ ESLint config: `eslint.config.ts` (flat config)
 
 ```
 src/
-├── App.vue          # Root component
-├── main.ts          # App entry point
-├── router/
-│   └── index.ts     # Vue Router configuration
-├── stores/
-│   └── *.ts         # Pinia stores
-├── assets/          # Static assets
-└── components/      # Vue components (create as needed)
+├── App.vue              # Root component
+├── main.ts              # App entry point
+├── access/              # Permission control module
+│   ├── accessEnum.ts    # Permission enum definition
+│   ├── checkAccess.ts   # Permission check function
+│   └── index.ts         # Router guard & module entry
+├── api/                 # Auto-generated API code
+├── components/          # Vue components
+│   ├── GlobalHeader.vue # Global header component
+│   └── GlobalFooter.vue # Global footer component
+├── layouts/             # Layout components
+│   └── BasicLayout.vue  # Basic layout (header/content/footer)
+├── router/              # Vue Router configuration
+│   └── index.ts
+├── stores/              # Pinia stores
+│   └── loginUser.ts     # Login user state
+├── utils/               # Utility functions
+│   └── request.ts       # Axios request wrapper
+└── views/               # Page components
+    ├── HomePage.vue
+    ├── UserLoginPage.vue
+    ├── UserRegisterPage.vue
+    ├── UserManagePage.vue
+    └── NoAuth.vue
 ```
+
+## Permission System
+
+### Permission Levels (ACCESS_ENUM)
+
+- `NOT_LOGIN` - No login required
+- `USER` - Login required
+- `ADMIN` - Admin role required
+
+### Route Configuration
+
+```typescript
+{
+  path: '/admin/userManage',
+  meta: {
+    title: '用户管理',
+    access: ACCESS_ENUM.ADMIN,  // Permission requirement
+    hideInMenu: true,           // Hide from navigation menu
+  },
+}
+```
+
+### Menu Filtering
+
+Menu items are automatically filtered based on user permissions:
+- Routes with `hideInMenu: true` are hidden
+- Routes requiring higher permissions are hidden for unauthorized users
 
 ## Node Version
 
@@ -191,3 +234,4 @@ src/
 - Run `npm run type-check` to verify TypeScript types
 - Use Ant Design Vue components when UI elements are needed
 - Keep components small and focused; extract logic to composables/stores
+- Run `npm run openapi2ts` to regenerate API code when backend changes
