@@ -120,7 +120,9 @@ const sendMessage = async () => {
         }
       }
     }
-    
+    // 流结束，显示预览
+    showPreview.value = true
+    previewUrl.value = `http://localhost:8123/api/static/vue_${appId}/`
     sending.value = false
     generating.value = false
   } catch (error) {
