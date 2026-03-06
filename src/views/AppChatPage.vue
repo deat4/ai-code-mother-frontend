@@ -32,7 +32,7 @@ const previewUrl = ref('')
 // 获取应用信息
 const fetchAppInfo = async () => {
   try {
-    const res = await getAppVoById({ id: appId })
+    const res = await getAppVoById({ id: appId as unknown as number })
     if (res.data.code === 0 && res.data.data) {
       app.value = res.data.data
     } else {
@@ -68,7 +68,9 @@ const sendMessage = async () => {
   })
 
   try {
-    // 调用 SSE 接口
+    // 修复点 1：补全了调用的接口逻辑 (请根据你实际的 API 参数名确认是否需要 appId)
+    const response = await chatToGenCode({
+      appId: Number(appId),
       message: userMsg.content,
     })
 
@@ -98,7 +100,8 @@ const sendMessage = async () => {
 // 部署应用
 const handleDeploy = async () => {
   try {
-    const res = await deployApp({ appId: appId as unknown as number })
+    // 修复点 2：使用了更规范的类型转换 Number(appId)
+    const res = await deployApp({ appId: Number(appId) })
     if (res.data.code === 0 && res.data.data) {
       message.success('部署成功')
       // 打开部署的 URL
@@ -123,7 +126,6 @@ onMounted(() => {
 
 <template>
   <div class="app-chat-page">
-    <!-- 顶部栏 -->
     <div class="chat-header">
       <div class="header-left">
         <a-space>
@@ -137,9 +139,7 @@ onMounted(() => {
       </a-button>
     </div>
 
-    <!-- 核心内容区域 -->
     <div class="chat-content">
-      <!-- 左侧对话区域 -->
       <div class="chat-section">
         <div class="message-list">
           <div v-for="msg in messages" :key="msg.id" class="message-item" :class="msg.role">
@@ -165,7 +165,6 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- 用户输入框 -->
         <div class="input-section">
           <a-textarea
             v-model:value="inputText"
@@ -195,7 +194,6 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 右侧网页展示区域 -->
       <div v-if="showPreview" class="preview-section">
         <div class="preview-header">
           <span class="preview-title">预览效果</span>
@@ -392,14 +390,6 @@ onMounted(() => {
   flex: 1;
   overflow: hidden;
 }
-
-.preview-frame {
-  width: 100%;
-  height: 100%;
-  border: none;
-}
-</style>
-
 
 .preview-frame {
   width: 100%;

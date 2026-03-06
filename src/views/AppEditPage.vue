@@ -53,7 +53,7 @@ const handleSubmit = async () => {
   try {
     submitting.value = true
     const res = await updateApp({
-      id: appId,
+      id: appId as unknown as number,
       appName: formState.appName,
     })
     if (res.data.code === 0) {
