@@ -1,8 +1,7 @@
-<script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { message } from 'ant-design-vue'
-import { getAppVoById, deployApp } from '@/api/appController'
+import { useRoute, useRouter } from 'vue-router'
+import { message, Modal } from 'ant-design-vue'
+import { getAppVoById, deployApp, deleteApp } from '@/api/appController'
 import { useLoginUserStore } from '@/stores/loginUser'
 
 const route = useRoute()
@@ -152,7 +151,38 @@ const handleDeploy = async () => {
     }
   } catch {
     message.error('部署失败')
-  }
+}
+
+// 应用详情弹窗
+const showAppInfo = ref(false)
+
+// 删除应用
+const handleDeleteApp = async () => {
+  Modal.confirm({
+    title: '确认删除',
+    content: '确定要删除该应用吗？此操作不可恢复。',
+    okText: '确认',
+    cancelText: '取消',
+    onOk: async () => {
+      try {
+        const res = await deleteApp({ id: appId as unknown as number })
+        if (res.data.code === 0) {
+          message.success('删除成功')
+          router.push('/')
+        } else {
+          message.error('删除失败')
+        }
+      } catch {
+        message.error('删除失败')
+      }
+    },
+  })
+}
+
+// 编辑应用
+const handleEditApp = () => {
+  router.push(`/app/edit/${appId}`)
+  showAppInfo.value = false
 }
 
 onMounted(() => {
