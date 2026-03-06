@@ -11,6 +11,24 @@ export const routes: RouteRecordRaw[] = [
     meta: { title: '主页' },
   },
   {
+    path: '/app/chat/:id',
+    name: '应用生成对话',
+    component: () => import('@/views/AppChatPage.vue'),
+    meta: { title: '应用生成', hideInMenu: true },
+  },
+  {
+    path: '/app/edit/:id',
+    name: '应用编辑',
+    component: () => import('@/views/AppEditPage.vue'),
+    meta: { title: '编辑应用', hideInMenu: true },
+  },
+  {
+    path: '/admin/appManage',
+    name: '应用管理',
+    component: () => import('@/views/AppManagePage.vue'),
+    meta: { title: '应用管理', access: ACCESS_ENUM.ADMIN },
+  },
+  {
     path: '/user/login',
     name: '用户登录',
     component: () => import('@/views/UserLoginPage.vue'),
