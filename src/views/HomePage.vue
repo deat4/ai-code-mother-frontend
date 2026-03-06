@@ -44,7 +44,6 @@ const handleCreateApp = async () => {
       initPrompt: promptText.value,
       codeGenType: 'HTML',
     })
-    // 修正点 1: 规范化响应判断
     if (res.data.code === 0 && res.data.data) {
       message.success('应用创建成功')
       router.push(`/app/chat/${res.data.data}`)
@@ -64,7 +63,6 @@ const loadMyApps = async () => {
     const res = await listMyAppVoByPage(myAppsParams)
     if (res.data.code === 0 && res.data.data) {
       myApps.value = res.data.data.records ?? []
-      // 修正点 2: 确认后端返回字段名，通常为 total
       myAppsTotal.value = Number(res.data.data.totalRow) || 0
     }
   } catch (error) {
@@ -141,6 +139,7 @@ const formatDateTime = (time?: string) => {
     return time
   }
 }
+
 onMounted(() => {
   loadMyApps()
   loadGoodApps()
@@ -218,12 +217,15 @@ onMounted(() => {
             <div v-else class="cover-placeholder"><span>📱</span></div>
             <div class="card-actions">
               <a-space direction="vertical" style="width: 100%">
-                <a-space style="width: 100%">
-                  <a-button type="primary" @click="app.id && goToChat(app.id, true)">查看详情</a-button>
-                  <a-button @click="openAppInfo(app)">📋 应用信息</a-button>
+                <a-space style="width: 100%; justify-content: center">
+                  <a-button type="primary" @click="app.id && goToChat(app.id, true)"
+                    >查看详情</a-button
+                  >
+                  <a-button @click="openAppInfo(app)">📋 信息</a-button>
                 </a-space>
                 <a-button v-if="app.deployKey" block @click="openDeployUrl(app)">在线预览</a-button>
               </a-space>
+            </div>
           </div>
           <h3 class="app-name">{{ app.appName ?? '未命名应用' }}</h3>
           <div class="app-meta">
@@ -233,8 +235,7 @@ onMounted(() => {
           </div>
         </div>
       </div>
-
-    <!-- 应用详情弹窗 -->
+    </div>
     <a-modal
       v-model:open="showAppInfoModal"
       :title="selectedApp?.appName ?? '应用详情'"
@@ -254,8 +255,8 @@ onMounted(() => {
           <span>{{ formatDateTime(selectedApp.createTime) }}</span>
         </div>
         <div class="info-row">
-          <span class="info-label">描述</span>
-          <span>{{ selectedApp.initPrompt ?? '无' }}</span>
+          <span class="info-label">应用描述</span>
+          <div class="info-desc">{{ selectedApp.initPrompt ?? '暂无描述' }}</div>
         </div>
       </div>
     </a-modal>
@@ -330,12 +331,12 @@ onMounted(() => {
 .card-actions {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  padding: 0 24px;
   opacity: 0;
   transition: opacity 0.3s;
 }
@@ -364,5 +365,37 @@ onMounted(() => {
   flex: 1;
   font-size: 13px;
   color: #666;
+}
+
+/* 修复点 3：补充弹窗所需的样式 */
+.app-info-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 0;
+}
+.info-row {
+  display: flex;
+  align-items: flex-start;
+  font-size: 14px;
+}
+.info-label {
+  color: #888;
+  width: 80px;
+  flex-shrink: 0;
+}
+.creator-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #333;
+}
+.info-desc {
+  color: #333;
+  line-height: 1.6;
+  background: #f9f9f9;
+  padding: 8px 12px;
+  border-radius: 6px;
+  width: 100%;
 }
 </style>

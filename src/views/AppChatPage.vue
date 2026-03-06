@@ -35,8 +35,26 @@ const isOwner = computed(() => {
   return String(app.value.userId) === String(loginUserStore.loginUser.id)
 })
 
+// 是否可以编辑（非只读模式且是所有者）
 const canEdit = computed(() => !isViewOnly.value && isOwner.value)
 
+// 格式化完整时间
+const formatDateTime = (time?: string) => {
+  if (!time) return '-'
+  try {
+    const date = new Date(time)
+    return date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+  } catch {
+    return time
+  }
+}
 // 预览相关
 const showPreview = ref(false)
 const previewUrl = ref('')
@@ -205,10 +223,7 @@ onMounted(() => {
       </div>
       <div class="header-right">
         <a-space>
-          <template v-if="isOwner">
-            <a-button @click="handleEditApp">编辑</a-button>
-            <a-button danger @click="handleDeleteApp">删除</a-button>
-          </template>
+          <a-button @click="showAppInfo = true">ℹ️ 应用详情</a-button>
           <a-button type="primary" @click="handleDeploy">
             <template #icon>🚀</template>部署
           </a-button>
@@ -273,8 +288,32 @@ onMounted(() => {
         <div class="preview-container">
           <iframe :src="previewUrl" class="preview-frame" />
         </div>
+
+    <!-- 应用详情弹窗 -->
+    <a-modal
+      v-model:open="showAppInfo"
+      title="应用详情"
+      :footer="null"
+      width="450px"
+    >
+      <div class="app-info-modal">
+        <div class="info-item">
+          <span class="info-label">创建者：</span>
+          <div class="creator-info">
+            <a-avatar :src="app?.user?.userAvatar" size="small" />
+            <span>{{ app?.user?.userName ?? '未知' }}</span>
+          </div>
+        </div>
+        <div class="info-item">
+          <span class="info-label">创建时间：</span>
+          <span class="info-value">{{ formatDateTime(app?.createTime) }}</span>
+        </div>
+        <div v-if="canEdit" class="action-buttons">
+          <a-button type="primary" @click="handleEditApp">✏️ 修改</a-button>
+          <a-button danger @click="handleDeleteApp">🗑️ 删除</a-button>
+        </div>
       </div>
-    </div>
+    </a-modal>
   </div>
 </template>
 
