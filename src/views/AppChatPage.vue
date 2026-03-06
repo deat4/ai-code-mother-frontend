@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { getAppVoById, deployApp, chatToGenCode } from '@/api/appController'
+import { getAppVoById, deployApp } from '@/api/appController'
 
 const route = useRoute()
 
@@ -68,41 +68,63 @@ const sendMessage = async () => {
   })
 
   try {
-    // 使用 EventSource 处理 SSE 流
+    // 使用 fetch API 处理 SSE 流（支持携带 Cookie）
     const url = `http://localhost:8123/api/app/chat/gen/code?appId=${encodeURIComponent(appId)}&message=${encodeURIComponent(userMsg.content)}`
-    const eventSource = new EventSource(url)
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include', // 携带 Cookie
+    })
     
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    
+    const reader = response.body?.getReader()
+    if (!reader) {
+      throw new Error('No reader available')
+    }
+    
+    const decoder = new TextDecoder()
     const aiMsg = messages.value.find((m) => m.id === aiMessageId)
+    let buffer = ''
     
-    eventSource.onmessage = (event) => {
-      try {
-        // 解析后端返回的 JSON 数据 { "d": "内容片段" }
-        const data = JSON.parse(event.data)
-        if (data.d && aiMsg) {
-          // 追加内容到 AI 消息
-          aiMsg.content += data.d
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      
+      buffer += decoder.decode(value, { stream: true })
+      
+      // 解析 SSE 数据
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || '' // 保留未完成的行
+      
+      for (const line of lines) {
+        if (line.startsWith('data:')) {
+          const data = line.slice(5).trim()
+          if (data) {
+            try {
+              const parsed = JSON.parse(data)
+              if (parsed.d && aiMsg) {
+                aiMsg.content += parsed.d
+              }
+            } catch {
+              // 忽略解析错误
+            }
+          }
+        } else if (line.startsWith('event:done')) {
+          // 收到 done 事件
+          sending.value = false
+          generating.value = false
+          showPreview.value = true
+          previewUrl.value = `http://localhost:8123/api/static/vue_${appId}/`
         }
-      } catch (e) {
-        console.error('解析 SSE 数据失败:', e)
       }
     }
     
-    eventSource.onerror = () => {
-      eventSource.close()
-      sending.value = false
-      generating.value = false
-      message.error('生成失败，连接中断')
-    }
-    
-    eventSource.addEventListener('done', () => {
-      eventSource.close()
-      sending.value = false
-      generating.value = false
-      // 生成完成后显示预览
-      showPreview.value = true
-      previewUrl.value = `http://localhost:8123/api/static/vue_${appId}/`
-    })
-  } catch {
+    sending.value = false
+    generating.value = false
+  } catch (error) {
+    console.error('生成失败:', error)
     message.error('生成失败')
     sending.value = false
     generating.value = false
