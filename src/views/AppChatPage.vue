@@ -45,11 +45,14 @@ const fetchAppInfo = async () => {
     const res = await getAppVoById({ id: appId as unknown as number })
     if (res.data.code === 0 && res.data.data) {
       app.value = res.data.data
-      // 修复点 1：必须在获取到信息后再判断是否执行初始发送
-      if (app.value?.initPrompt && !isViewOnly.value && isOwner.value) {
-        inputText.value = app.value.initPrompt
-        sendMessage()
-      }
+      // 只有在非查看模式且是所有者时，才自动发送初始消息
+      // 添加延迟确保用户信息已加载
+      setTimeout(() => {
+        if (app.value?.initPrompt && !isViewOnly.value && isOwner.value) {
+          inputText.value = app.value.initPrompt
+          sendMessage()
+        }
+      }, 100)
     } else {
       message.error('获取应用信息失败')
     }
@@ -60,7 +63,7 @@ const fetchAppInfo = async () => {
 
 // 发送消息
 const sendMessage = async () => {
-  if (!inputText.value.trim() || sending.value) return
+  if (!inputText.value.trim() || sending.value || !canEdit.value) return
 
   const userMsg: ChatMessage = {
     id: Date.now().toString(),
@@ -179,7 +182,7 @@ onMounted(() => {
             </div>
             <div class="message-content">
               <div class="message-text">{{ msg.content }}</div>
-              <div v-if="msg.files" class="message-files">
+              <div v-if="msg.files && msg.files.length > 0" class="message-files">
                 <div v-for="file in msg.files" :key="file.path" class="file-item">
                   <span class="file-icon">📄</span>
                   <span class="file-name">{{ file.name }}</span>
@@ -191,30 +194,33 @@ onMounted(() => {
         </div>
 
         <div class="input-section">
-          <a-tooltip
-            :title="!canEdit ? '无法在别人的作品下对话哦~' : ''"
-            placement="top"
-          >
-            <a-textarea
-              v-model:value="inputText"
-              placeholder="描述生成需求..."
-              :auto-size="{ minRows: 3, maxRows: 6 }"
-              :disabled="!canEdit"
-              @press-enter.prevent="sendMessage"
-            />
+          <a-tooltip :title="!canEdit ? '无法在别人的作品下对话哦~' : ''" placement="top">
+            <div style="width: 100%">
+              <a-textarea
+                v-model:value="inputText"
+                placeholder="描述生成需求..."
+                :auto-size="{ minRows: 3, maxRows: 6 }"
+                :disabled="!canEdit"
+                @press-enter.prevent="sendMessage"
+              />
+            </div>
           </a-tooltip>
           <div class="input-actions">
             <div class="left-actions">
               <a-button size="small" :disabled="!canEdit">📎 上传</a-button>
               <a-button size="small" :disabled="!canEdit">✨ 优化</a-button>
             </div>
-            <a-button type="primary" shape="circle" @click="sendMessage" :loading="sending"
+            <a-button
+              type="primary"
+              shape="circle"
+              @click="sendMessage"
+              :loading="sending"
               :disabled="!canEdit"
               >↑</a-button
             >
           </div>
+        </div>
       </div>
-
       <div v-if="showPreview" class="preview-section">
         <div class="preview-header">
           <span class="preview-title">预览效果</span>
@@ -290,6 +296,10 @@ onMounted(() => {
   justify-content: space-between;
   margin-top: 12px;
 }
+.left-actions {
+  display: flex;
+  gap: 8px;
+}
 .preview-section {
   width: 50%;
   background: #fff;
@@ -305,22 +315,5 @@ onMounted(() => {
   height: 100%;
   border: none;
 }
-n;
-  margin-top: 12px;
-}
-.preview-section {
-  width: 50%;
-  background: #fff;
-  border-left: 1px solid #f0f0f0;
-  display: flex;
-  flex-direction: column;
-}
-.preview-container {
-  flex: 1;
-}
-.preview-frame {
-  width: 100%;
-  height: 100%;
-  border: none;
-}
+/* 修复点 2：删除了末尾多余且损坏的 CSS 代码 */
 </style>
