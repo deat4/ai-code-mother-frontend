@@ -68,40 +68,51 @@ const sendMessage = async () => {
   })
 
   try {
-    // 修复点 1：补全了调用的接口逻辑 (请根据你实际的 API 参数名确认是否需要 appId)
-    const response = await chatToGenCode({
-      appId: appId as unknown as number,
-      message: userMsg.content,
-    })
-
-    // 处理 SSE 流
-    if (response.data) {
-      const aiMsg = messages.value.find((m) => m.id === aiMessageId)
-      if (aiMsg) {
-        // 模拟流式输出（实际应该解析 SSE）
-        aiMsg.content = '正在生成代码...'
-        aiMsg.files = [
-          { name: 'Index.jsx', path: 'src/pages/Index.jsx' },
-          { name: 'nav-items.jsx', path: 'src/nav-items.jsx' },
-        ]
+    // 使用 EventSource 处理 SSE 流
+    const url = `http://localhost:8123/api/app/chat/gen/code?appId=${encodeURIComponent(appId)}&message=${encodeURIComponent(userMsg.content)}`
+    const eventSource = new EventSource(url)
+    
+    const aiMsg = messages.value.find((m) => m.id === aiMessageId)
+    
+    eventSource.onmessage = (event) => {
+      try {
+        // 解析后端返回的 JSON 数据 { "d": "内容片段" }
+        const data = JSON.parse(event.data)
+        if (data.d && aiMsg) {
+          // 追加内容到 AI 消息
+          aiMsg.content += data.d
+        }
+      } catch (e) {
+        console.error('解析 SSE 数据失败:', e)
       }
     }
+    
+    eventSource.onerror = () => {
+      eventSource.close()
+      sending.value = false
+      generating.value = false
+      message.error('生成失败，连接中断')
+    }
+    
+    eventSource.addEventListener('done', () => {
+      eventSource.close()
+      sending.value = false
+      generating.value = false
+      // 生成完成后显示预览
+      showPreview.value = true
+      previewUrl.value = `http://localhost:8123/api/static/vue_${appId}/`
+    })
   } catch {
     message.error('生成失败')
-  } finally {
     sending.value = false
     generating.value = false
-    // 生成完成后显示预览
-    showPreview.value = true
-    previewUrl.value = `http://localhost:8123/api/static/vue_${appId}/`
   }
 }
 
 // 部署应用
 const handleDeploy = async () => {
   try {
-    // 修复点 2：使用了更规范的类型转换 Number(appId)
-    const res = await deployApp({ appId: Number(appId) })
+    const res = await deployApp({ appId: appId as unknown as number })
     if (res.data.code === 0 && res.data.data) {
       message.success('部署成功')
       // 打开部署的 URL
