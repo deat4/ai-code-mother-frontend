@@ -115,6 +115,32 @@ const formatTime = (time?: string) => {
   }
 }
 
+// 应用详情弹窗
+const showAppInfoModal = ref(false)
+const selectedApp = ref<API.AppVO | null>(null)
+
+// 打开应用详情弹窗
+const openAppInfo = (app: API.AppVO) => {
+  selectedApp.value = app
+  showAppInfoModal.value = true
+}
+
+// 格式化完整时间
+const formatDateTime = (time?: string) => {
+  if (!time) return '-'
+  try {
+    const date = new Date(time)
+    return date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return time
+  }
+}
 onMounted(() => {
   loadMyApps()
   loadGoodApps()
@@ -191,9 +217,13 @@ onMounted(() => {
             <img v-if="app.cover" :src="app.cover" :alt="app.appName" />
             <div v-else class="cover-placeholder"><span>📱</span></div>
             <div class="card-actions">
-              <a-button type="primary" @click="app.id && goToChat(app.id, true)">查看详情</a-button>
-              <a-button v-if="app.deployKey" @click="openDeployUrl(app)">在线预览</a-button>
-            </div>
+              <a-space direction="vertical" style="width: 100%">
+                <a-space style="width: 100%">
+                  <a-button type="primary" @click="app.id && goToChat(app.id, true)">查看详情</a-button>
+                  <a-button @click="openAppInfo(app)">📋 应用信息</a-button>
+                </a-space>
+                <a-button v-if="app.deployKey" block @click="openDeployUrl(app)">在线预览</a-button>
+              </a-space>
           </div>
           <h3 class="app-name">{{ app.appName ?? '未命名应用' }}</h3>
           <div class="app-meta">
@@ -203,7 +233,32 @@ onMounted(() => {
           </div>
         </div>
       </div>
-    </div>
+
+    <!-- 应用详情弹窗 -->
+    <a-modal
+      v-model:open="showAppInfoModal"
+      :title="selectedApp?.appName ?? '应用详情'"
+      :footer="null"
+      width="500px"
+    >
+      <div v-if="selectedApp" class="app-info-content">
+        <div class="info-row">
+          <span class="info-label">创建者</span>
+          <div class="creator-info">
+            <a-avatar :src="selectedApp.user?.userAvatar" size="small" />
+            <span>{{ selectedApp.user?.userName ?? '未知' }}</span>
+          </div>
+        </div>
+        <div class="info-row">
+          <span class="info-label">创建时间</span>
+          <span>{{ formatDateTime(selectedApp.createTime) }}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">描述</span>
+          <span>{{ selectedApp.initPrompt ?? '无' }}</span>
+        </div>
+      </div>
+    </a-modal>
   </div>
 </template>
 

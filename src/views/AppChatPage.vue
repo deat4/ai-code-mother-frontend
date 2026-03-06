@@ -1,3 +1,4 @@
+<script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
@@ -5,6 +6,8 @@ import { getAppVoById, deployApp, deleteApp } from '@/api/appController'
 import { useLoginUserStore } from '@/stores/loginUser'
 
 const route = useRoute()
+// 修复点 1：补充实例化 router，否则下面调用 router.push 会报错
+const router = useRouter()
 const loginUserStore = useLoginUserStore()
 const appId = route.params.id as string
 
@@ -151,7 +154,8 @@ const handleDeploy = async () => {
     }
   } catch {
     message.error('部署失败')
-}
+  }
+} // 修复点 2：补上了这里缺失的右大括号
 
 // 应用详情弹窗
 const showAppInfo = ref(false)
@@ -199,7 +203,17 @@ onMounted(() => {
           <span class="app-name">{{ app?.appName ?? '加载中...' }}</span>
         </a-space>
       </div>
-      <a-button type="primary" @click="handleDeploy"> <template #icon>🚀</template>部署 </a-button>
+      <div class="header-right">
+        <a-space>
+          <template v-if="isOwner">
+            <a-button @click="handleEditApp">编辑</a-button>
+            <a-button danger @click="handleDeleteApp">删除</a-button>
+          </template>
+          <a-button type="primary" @click="handleDeploy">
+            <template #icon>🚀</template>部署
+          </a-button>
+        </a-space>
+      </div>
     </div>
 
     <div class="chat-content">
@@ -280,6 +294,10 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
 }
+.header-right {
+  display: flex;
+  align-items: center;
+}
 .chat-content {
   flex: 1;
   display: flex;
@@ -345,5 +363,4 @@ onMounted(() => {
   height: 100%;
   border: none;
 }
-/* 修复点 2：删除了末尾多余且损坏的 CSS 代码 */
 </style>
