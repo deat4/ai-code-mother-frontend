@@ -6,7 +6,7 @@ import { getAppVoById, deployApp, chatToGenCode } from '@/api/appController'
 
 const route = useRoute()
 
-const appId = Number(route.params.id)
+const appId = route.params.id as string
 
 // 应用信息
 const app = ref<API.AppVO>()
@@ -69,8 +69,6 @@ const sendMessage = async () => {
 
   try {
     // 调用 SSE 接口
-    const response = await chatToGenCode({
-      appId,
       message: userMsg.content,
     })
 
@@ -100,7 +98,7 @@ const sendMessage = async () => {
 // 部署应用
 const handleDeploy = async () => {
   try {
-    const res = await deployApp({ appId })
+    const res = await deployApp({ appId: appId as unknown as number })
     if (res.data.code === 0 && res.data.data) {
       message.success('部署成功')
       // 打开部署的 URL
@@ -394,6 +392,14 @@ onMounted(() => {
   flex: 1;
   overflow: hidden;
 }
+
+.preview-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+</style>
+
 
 .preview-frame {
   width: 100%;

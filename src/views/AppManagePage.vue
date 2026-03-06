@@ -101,7 +101,7 @@ const handleDelete = (id: number) => {
 }
 
 // 编辑应用
-const handleEdit = (id: number) => {
+const handleEdit = (id: string | number) => {
   router.push(`/app/edit/${id}`)
 }
 
@@ -109,7 +109,7 @@ const handleEdit = (id: number) => {
 const handleSetGood = async (record: API.AppVO) => {
   try {
     const res = await updateAppByAdmin({
-      id: record.id,
+      id: record.id as unknown as number,
       priority: 99,
     })
     if (res.data.code === 0) {

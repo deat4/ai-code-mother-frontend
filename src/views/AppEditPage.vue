@@ -9,7 +9,7 @@ const route = useRoute()
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
 
-const appId = Number(route.params.id)
+const appId = route.params.id as string
 
 // 表单数据
 const formState = reactive({
@@ -28,7 +28,7 @@ const isAdmin = ref(loginUserStore.loginUser.userRole === 'admin')
 const loadAppInfo = async () => {
   try {
     loading.value = true
-    const res = await getAppVoById({ id: appId })
+    const res = await getAppVoById({ id: appId as unknown as number })
     if (res.data.code === 0 && res.data.data) {
       const app = res.data.data
       formState.appName = app.appName ?? ''
