@@ -116,13 +116,13 @@ const sendMessage = async () => {
           sending.value = false
           generating.value = false
           showPreview.value = true
-          previewUrl.value = `http://localhost:8123/api/static/vue_${appId}/`
+          previewUrl.value = `http://localhost:8123/api/static/${app.value?.codeGenType?.toLowerCase() || 'html'}_${appId}/`
         }
       }
     }
     // 流结束，显示预览
     showPreview.value = true
-    previewUrl.value = `http://localhost:8123/api/static/${app.value?.codeGenType?.toLowerCase() || 'html'}_${appId}/`
+    previewUrl.value = `http://localhost:8123/api/static/html_${appId}/`
     sending.value = false
     generating.value = false
   } catch (error) {
