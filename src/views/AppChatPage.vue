@@ -76,7 +76,15 @@ const sendMessage = async () => {
     })
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      // 尝试解析错误信息
+      let errorMsg = `HTTP error! status: ${response.status}`
+      try {
+        const errorData = await response.json()
+        errorMsg = errorData.message || errorMsg
+      } catch {
+        // 无法解析 JSON，使用默认错误消息
+      }
+      throw new Error(errorMsg)
     }
 
     const reader = response.body?.getReader()
@@ -401,6 +409,37 @@ onMounted(() => {
 .preview-section {
   width: 50%;
   background: #fff;
+  border-left: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-header {
+  height: 48px;
+  padding: 0 16px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.preview-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.preview-container {
+  flex: 1;
+  overflow: hidden;
+}
+
+.preview-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+}
   border-left: 1px solid #f0f0f0;
   display: flex;
   flex-direction: column;
