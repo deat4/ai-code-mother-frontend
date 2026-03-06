@@ -24,6 +24,8 @@ const goodAppsTotal = ref(0)
 const goodAppsParams = reactive({
   current: 1,
   pageSize: 20,
+  sortField: 'createTime',
+  sortOrder: 'desc',
 })
 
 // 快速创建示例
