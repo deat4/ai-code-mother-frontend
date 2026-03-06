@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { getAppVoById, deployApp } from '@/api/appController'
+import { useLoginUserStore } from '@/stores/loginUser'
 
 const route = useRoute()
+const loginUserStore = useLoginUserStore()
 const appId = route.params.id as string
 
-// 应用信息
+// 是否为只读模式（从精选页面点击进入）
+const isViewOnly = computed(() => route.query.view === '1')
 const app = ref<API.AppVO>()
 
 // 对话消息
@@ -24,6 +27,14 @@ const inputText = ref('')
 const sending = ref(false)
 const generating = ref(false)
 
+// 是否是应用的所有者
+const isOwner = computed(() => {
+  if (!app.value || !loginUserStore.loginUser.id) return false
+  return String(app.value.userId) === String(loginUserStore.loginUser.id)
+})
+
+const canEdit = computed(() => !isViewOnly.value && isOwner.value)
+
 // 预览相关
 const showPreview = ref(false)
 const previewUrl = ref('')
@@ -31,11 +42,11 @@ const previewUrl = ref('')
 // 获取应用信息
 const fetchAppInfo = async () => {
   try {
-    const res = await getAppVoById({ id: appId as unknown as any })
+    const res = await getAppVoById({ id: appId as unknown as number })
     if (res.data.code === 0 && res.data.data) {
       app.value = res.data.data
       // 修复点 1：必须在获取到信息后再判断是否执行初始发送
-      if (app.value?.initPrompt) {
+      if (app.value?.initPrompt && !isViewOnly.value && isOwner.value) {
         inputText.value = app.value.initPrompt
         sendMessage()
       }
@@ -105,7 +116,7 @@ const sendMessage = async () => {
             if (parsed.d && aiMsg) {
               aiMsg.content += parsed.d
             }
-          } catch (e) {
+          } catch {
             /* 忽略心跳或非JSON */
           }
         } else if (trimmedLine.startsWith('event:done')) {
@@ -129,7 +140,7 @@ const sendMessage = async () => {
 // 部署应用
 const handleDeploy = async () => {
   try {
-    const res = await deployApp({ appId: appId as unknown as any })
+    const res = await deployApp({ appId: appId as unknown as number })
     if (res.data.code === 0 && res.data.data) {
       message.success('部署成功')
       window.open(res.data.data, '_blank')
@@ -180,22 +191,28 @@ onMounted(() => {
         </div>
 
         <div class="input-section">
-          <a-textarea
-            v-model:value="inputText"
-            placeholder="描述生成需求..."
-            :auto-size="{ minRows: 3, maxRows: 6 }"
-            @press-enter.prevent="sendMessage"
-          />
+          <a-tooltip
+            :title="!canEdit ? '无法在别人的作品下对话哦~' : ''"
+            placement="top"
+          >
+            <a-textarea
+              v-model:value="inputText"
+              placeholder="描述生成需求..."
+              :auto-size="{ minRows: 3, maxRows: 6 }"
+              :disabled="!canEdit"
+              @press-enter.prevent="sendMessage"
+            />
+          </a-tooltip>
           <div class="input-actions">
             <div class="left-actions">
-              <a-button size="small">📎 上传</a-button>
-              <a-button size="small">✨ 优化</a-button>
+              <a-button size="small" :disabled="!canEdit">📎 上传</a-button>
+              <a-button size="small" :disabled="!canEdit">✨ 优化</a-button>
             </div>
             <a-button type="primary" shape="circle" @click="sendMessage" :loading="sending"
+              :disabled="!canEdit"
               >↑</a-button
             >
           </div>
-        </div>
       </div>
 
       <div v-if="showPreview" class="preview-section">
@@ -271,6 +288,24 @@ onMounted(() => {
 .input-actions {
   display: flex;
   justify-content: space-between;
+  margin-top: 12px;
+}
+.preview-section {
+  width: 50%;
+  background: #fff;
+  border-left: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+}
+.preview-container {
+  flex: 1;
+}
+.preview-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+n;
   margin-top: 12px;
 }
 .preview-section {

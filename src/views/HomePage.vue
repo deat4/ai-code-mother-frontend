@@ -11,7 +11,7 @@ const promptText = ref('')
 const creating = ref(false)
 
 // 我的应用
-const myApps = ref<any[]>([])
+const myApps = ref<API.AppVO[]>([])
 const myAppsTotal = ref(0)
 const myAppsParams = reactive({
   current: 1,
@@ -19,7 +19,7 @@ const myAppsParams = reactive({
 })
 
 // 精选应用
-const goodApps = ref<any[]>([])
+const goodApps = ref<API.AppVO[]>([])
 const goodAppsTotal = ref(0)
 const goodAppsParams = reactive({
   current: 1,
@@ -44,12 +44,12 @@ const handleCreateApp = async () => {
       initPrompt: promptText.value,
       codeGenType: 'HTML',
     })
+    // 修正点 1: 规范化响应判断
     if (res.data.code === 0 && res.data.data) {
       message.success('应用创建成功')
-      // 跳转到对话页面
       router.push(`/app/chat/${res.data.data}`)
     } else {
-      message.error('创建失败，' + (res.data.message ?? '未知错误'))
+      message.error('创建失败：' + (res.data.message ?? '未知错误'))
     }
   } catch {
     message.error('创建失败，请稍后重试')
@@ -64,7 +64,8 @@ const loadMyApps = async () => {
     const res = await listMyAppVoByPage(myAppsParams)
     if (res.data.code === 0 && res.data.data) {
       myApps.value = res.data.data.records ?? []
-      myAppsTotal.value = res.data.data.totalRow ?? 0
+      // 修正点 2: 确认后端返回字段名，通常为 total
+      myAppsTotal.value = Number(res.data.data.totalRow) || 0
     }
   } catch (error) {
     console.error('加载我的应用失败:', error)
@@ -77,26 +78,24 @@ const loadGoodApps = async () => {
     const res = await listGoodAppVoByPage(goodAppsParams)
     if (res.data.code === 0 && res.data.data) {
       goodApps.value = res.data.data.records ?? []
-      goodAppsTotal.value = res.data.data.totalRow ?? 0
+      goodAppsTotal.value = res.data.data.totalRow || 0
     }
   } catch (error) {
     console.error('加载精选应用失败:', error)
   }
 }
 
-// 跳转到对话页面
-const goToChat = (appId: number | string) => {
-  router.push(`/app/chat/${appId}`)
+const goToChat = (appId: number | string, viewOnly: boolean = false) => {
+  const url = `/app/chat/${appId}${viewOnly ? '?view=1' : ''}`
+  router.push(url)
 }
 
-// 打开部署地址
-const openDeployUrl = (app: any) => {
+const openDeployUrl = (app: API.AppVO) => {
   if (!app.deployKey) return
   const url = `http://localhost:8123/api/static/${app.deployKey}/`
   window.open(url, '_blank')
 }
 
-// 格式化时间
 const formatTime = (time?: string) => {
   if (!time) return ''
   try {
@@ -105,7 +104,7 @@ const formatTime = (time?: string) => {
     const diff = now.getTime() - date.getTime()
     const hours = Math.floor(diff / (1000 * 60 * 60))
     const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-    
+
     if (hours < 1) return '刚刚'
     if (hours < 24) return `${hours}小时前`
     if (days === 1) return '昨天'
@@ -124,7 +123,6 @@ onMounted(() => {
 
 <template>
   <div class="home-page">
-    <!-- 网站标题和输入框 -->
     <div class="hero-section">
       <h1 class="title">
         一句话
@@ -135,22 +133,22 @@ onMounted(() => {
       <div class="prompt-input-wrapper">
         <a-textarea
           v-model:value="promptText"
-          placeholder="使用 NoCode 创建一个高效的小工具，帮我计算……"
+          placeholder="描述你的想法，例如：创建一个个人简历网页"
           :auto-size="{ minRows: 3, maxRows: 6 }"
           class="prompt-input"
         />
         <div class="input-actions">
           <div class="left-actions">
-            <a-button size="small">
-              <template #icon>📎</template>
-              上传
-            </a-button>
-            <a-button size="small">
-              <template #icon>✨</template>
-              优化
-            </a-button>
+            <a-button size="small">📎 上传</a-button>
+            <a-button size="small">✨ 优化</a-button>
           </div>
-          <a-button type="primary" shape="circle" size="large" @click="handleCreateApp">
+          <a-button
+            type="primary"
+            shape="circle"
+            size="large"
+            @click="handleCreateApp"
+            :loading="creating"
+          >
             <template #icon>↑</template>
           </a-button>
         </div>
@@ -167,24 +165,16 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 我的作品 -->
     <div class="apps-section" v-if="myApps.length > 0">
       <h2 class="section-title">我的作品</h2>
       <div class="apps-grid">
         <div v-for="app in myApps" :key="app.id" class="app-card">
           <div class="app-cover">
             <img v-if="app.cover" :src="app.cover" :alt="app.appName" />
-            <div v-else class="cover-placeholder">
-              <span>📱</span>
-            </div>
-            <!-- 悬浮按钮 -->
+            <div v-else class="cover-placeholder"><span>📱</span></div>
             <div class="card-actions">
-              <a-button type="primary" @click="goToChat(app.id)">
-                查看对话
-              </a-button>
-              <a-button v-if="app.deployKey" @click="openDeployUrl(app)">
-                查看作品
-              </a-button>
+              <a-button type="primary" @click="app.id && goToChat(app.id)">查看对话</a-button>
+              <a-button v-if="app.deployKey" @click="openDeployUrl(app)">查看作品</a-button>
             </div>
           </div>
           <h3 class="app-name">{{ app.appName ?? '未命名应用' }}</h3>
@@ -193,24 +183,16 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 精选案例 -->
     <div class="apps-section" v-if="goodApps.length > 0">
       <h2 class="section-title">精选案例</h2>
       <div class="apps-grid">
         <div v-for="app in goodApps" :key="app.id" class="app-card">
           <div class="app-cover">
             <img v-if="app.cover" :src="app.cover" :alt="app.appName" />
-            <div v-else class="cover-placeholder">
-              <span>📱</span>
-            </div>
-            <!-- 悬浮按钮 -->
+            <div v-else class="cover-placeholder"><span>📱</span></div>
             <div class="card-actions">
-              <a-button type="primary" @click="goToChat(app.id)">
-                查看对话
-              </a-button>
-              <a-button v-if="app.deployKey" @click="openDeployUrl(app)">
-                查看作品
-              </a-button>
+              <a-button type="primary" @click="app.id && goToChat(app.id, true)">查看详情</a-button>
+              <a-button v-if="app.deployKey" @click="openDeployUrl(app)">在线预览</a-button>
             </div>
           </div>
           <h3 class="app-name">{{ app.appName ?? '未命名应用' }}</h3>
@@ -218,8 +200,8 @@ onMounted(() => {
             <a-avatar :src="app.user?.userAvatar" size="small" />
             <span class="user-name">{{ app.user?.userName ?? '匿名' }}</span>
             <a-tag color="purple" v-if="app.user?.userRole === 'admin'">官方</a-tag>
-            <a-tag v-else>用户应用</a-tag>
           </div>
+        </div>
       </div>
     </div>
   </div>
@@ -231,181 +213,101 @@ onMounted(() => {
   margin: 0 auto;
   padding: 48px 24px;
 }
-
 .hero-section {
   text-align: center;
   margin-bottom: 64px;
-  background: linear-gradient(135deg, #e0f7fa 0%, #b2ebf2 50%, #80deea 100%);
+  background: linear-gradient(135deg, #f5feff 0%, #e0f7fa 100%);
   padding: 64px 24px;
-  border-radius: 16px;
+  border-radius: 24px;
 }
-
 .title {
   font-size: 48px;
-  font-weight: 700;
-  color: #333;
-  margin-bottom: 16px;
+  font-weight: 800;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 16px;
 }
-
 .logo {
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
 }
-
-.subtitle {
-  font-size: 18px;
-  color: #666;
-  margin-bottom: 32px;
-}
-
 .prompt-input-wrapper {
   max-width: 800px;
   margin: 0 auto 24px;
   background: #fff;
   border-radius: 16px;
   padding: 16px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+  border: 1px solid #eee;
 }
-
 .prompt-input {
   border: none !important;
   box-shadow: none !important;
-  resize: none;
 }
-
-.prompt-input :deep(textarea) {
-  font-size: 16px;
-}
-
-.input-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 16px;
-}
-
-.left-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.quick-prompts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  justify-content: center;
-  margin-top: 32px;
-}
-
-.apps-section {
-  margin-bottom: 64px;
-}
-
-.section-title {
-  font-size: 28px;
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 24px;
-}
-
 .apps-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 24px;
 }
-
 .app-card {
   background: #fff;
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  transition: transform 0.3s;
+  border: 1px solid #f0f0f0;
+  transition: all 0.3s;
 }
-
 .app-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-5px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
 }
-
 .app-cover {
-  height: 200px;
-  background: #f5f5f5;
-  overflow: hidden;
+  height: 180px;
   position: relative;
+  background: #fafafa;
 }
-
 .app-cover img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-
-.cover-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  font-size: 64px;
-}
-
-.app-name {
-  font-size: 18px;
-  font-weight: 600;
-  color: #333;
-  padding: 16px;
-  margin: 0;
-}
-
-.app-time {
-  font-size: 14px;
-  color: #999;
-  padding: 0 16px 16px;
-  margin: 0;
-}
-
 .card-actions {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 10px;
   opacity: 0;
   transition: opacity 0.3s;
 }
-
 .app-card:hover .card-actions {
   opacity: 1;
 }
-
-.card-actions .ant-btn {
-  min-width: 120px;
-  height: 40px;
-  font-size: 16px;
-}
-
 .app-name {
-
+  font-size: 16px;
+  font-weight: 600;
+  padding: 12px 16px 4px;
+  margin: 0;
+}
+.app-time {
+  font-size: 12px;
+  color: #999;
+  padding: 0 16px 12px;
+}
 .app-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 16px;
-  border-top: 1px solid #f0f0f0;
+  padding: 12px 16px;
+  border-top: 1px solid #f5f5f5;
 }
-
 .user-name {
   flex: 1;
-  font-size: 14px;
+  font-size: 13px;
   color: #666;
 }
 </style>
