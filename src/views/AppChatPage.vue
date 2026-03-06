@@ -70,7 +70,7 @@ const sendMessage = async () => {
   try {
     // 修复点 1：补全了调用的接口逻辑 (请根据你实际的 API 参数名确认是否需要 appId)
     const response = await chatToGenCode({
-      appId: Number(appId),
+      appId: appId as unknown as number,
       message: userMsg.content,
     })
 
