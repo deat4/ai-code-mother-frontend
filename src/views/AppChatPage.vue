@@ -122,7 +122,7 @@ const sendMessage = async () => {
     }
     // 流结束，显示预览
     showPreview.value = true
-    previewUrl.value = `http://localhost:8123/api/static/HTML_${appId}/`
+    previewUrl.value = `http://localhost:8123/api/preview/${app.value?.codeGenType || 'HTML'}_${appId}/`
     sending.value = false
     generating.value = false
   } catch (error) {
