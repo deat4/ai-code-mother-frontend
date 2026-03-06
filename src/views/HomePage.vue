@@ -11,7 +11,7 @@ const promptText = ref('')
 const creating = ref(false)
 
 // 我的应用
-const myApps = ref<API.AppVO[]>([])
+const myApps = ref<any[]>([])
 const myAppsTotal = ref(0)
 const myAppsParams = reactive({
   current: 1,
@@ -19,7 +19,7 @@ const myAppsParams = reactive({
 })
 
 // 精选应用
-const goodApps = ref<API.AppVO[]>([])
+const goodApps = ref<any[]>([])
 const goodAppsTotal = ref(0)
 const goodAppsParams = reactive({
   current: 1,
@@ -84,6 +84,38 @@ const loadGoodApps = async () => {
   }
 }
 
+// 跳转到对话页面
+const goToChat = (appId: number | string) => {
+  router.push(`/app/chat/${appId}`)
+}
+
+// 打开部署地址
+const openDeployUrl = (app: any) => {
+  if (!app.deployKey) return
+  const url = `http://localhost:8123/api/static/${app.deployKey}/`
+  window.open(url, '_blank')
+}
+
+// 格式化时间
+const formatTime = (time?: string) => {
+  if (!time) return ''
+  try {
+    const date = new Date(time)
+    const now = new Date()
+    const diff = now.getTime() - date.getTime()
+    const hours = Math.floor(diff / (1000 * 60 * 60))
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+    
+    if (hours < 1) return '刚刚'
+    if (hours < 24) return `${hours}小时前`
+    if (days === 1) return '昨天'
+    if (days < 7) return `${days}天前`
+    return date.toLocaleDateString('zh-CN')
+  } catch {
+    return time
+  }
+}
+
 onMounted(() => {
   loadMyApps()
   loadGoodApps()
@@ -145,9 +177,18 @@ onMounted(() => {
             <div v-else class="cover-placeholder">
               <span>📱</span>
             </div>
+            <!-- 悬浮按钮 -->
+            <div class="card-actions">
+              <a-button type="primary" @click="goToChat(app.id)">
+                查看对话
+              </a-button>
+              <a-button v-if="app.deployKey" @click="openDeployUrl(app)">
+                查看作品
+              </a-button>
+            </div>
           </div>
           <h3 class="app-name">{{ app.appName ?? '未命名应用' }}</h3>
-          <p class="app-time">创建于 {{ app.createTime }}</p>
+          <p class="app-time">创建于 {{ formatTime(app.createTime) }}</p>
         </div>
       </div>
     </div>
@@ -162,6 +203,15 @@ onMounted(() => {
             <div v-else class="cover-placeholder">
               <span>📱</span>
             </div>
+            <!-- 悬浮按钮 -->
+            <div class="card-actions">
+              <a-button type="primary" @click="goToChat(app.id)">
+                查看对话
+              </a-button>
+              <a-button v-if="app.deployKey" @click="openDeployUrl(app)">
+                查看作品
+              </a-button>
+            </div>
           </div>
           <h3 class="app-name">{{ app.appName ?? '未命名应用' }}</h3>
           <div class="app-meta">
@@ -170,7 +220,6 @@ onMounted(() => {
             <a-tag color="purple" v-if="app.user?.userRole === 'admin'">官方</a-tag>
             <a-tag v-else>用户应用</a-tag>
           </div>
-        </div>
       </div>
     </div>
   </div>
@@ -286,6 +335,7 @@ onMounted(() => {
   height: 200px;
   background: #f5f5f5;
   overflow: hidden;
+  position: relative;
 }
 
 .app-cover img {
@@ -316,6 +366,34 @@ onMounted(() => {
   padding: 0 16px 16px;
   margin: 0;
 }
+
+.card-actions {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.app-card:hover .card-actions {
+  opacity: 1;
+}
+
+.card-actions .ant-btn {
+  min-width: 120px;
+  height: 40px;
+  font-size: 16px;
+}
+
+.app-name {
 
 .app-meta {
   display: flex;
