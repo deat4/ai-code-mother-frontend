@@ -40,7 +40,7 @@ const handleCreateApp = async () => {
     const res = await addApp({
       appName: promptText.value.slice(0, 20),
       initPrompt: promptText.value,
-      codeGenType: 'vue',
+      codeGenType: 'HTML',
     })
     if (res.data.code === 0 && res.data.data) {
       message.success('应用创建成功')

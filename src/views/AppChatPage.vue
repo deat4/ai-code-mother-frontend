@@ -74,30 +74,30 @@ const sendMessage = async () => {
       method: 'GET',
       credentials: 'include', // 携带 Cookie
     })
-    
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
-    
+
     const reader = response.body?.getReader()
     if (!reader) {
       throw new Error('No reader available')
     }
-    
+
     const decoder = new TextDecoder()
     const aiMsg = messages.value.find((m) => m.id === aiMessageId)
     let buffer = ''
-    
+
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
-      
+
       buffer += decoder.decode(value, { stream: true })
-      
+
       // 解析 SSE 数据
       const lines = buffer.split('\n')
       buffer = lines.pop() || '' // 保留未完成的行
-      
+
       for (const line of lines) {
         if (line.startsWith('data:')) {
           const data = line.slice(5).trim()
@@ -116,13 +116,13 @@ const sendMessage = async () => {
           sending.value = false
           generating.value = false
           showPreview.value = true
-          previewUrl.value = `http://localhost:8123/api/static/${app.value?.codeGenType?.toLowerCase() || 'html'}_${appId}/`
+          previewUrl.value = `http://localhost:8123/api/static/${app.value?.codeGenType || 'HTML'}_${appId}/`
         }
       }
     }
     // 流结束，显示预览
     showPreview.value = true
-    previewUrl.value = `http://localhost:8123/api/static/html_${appId}/`
+    previewUrl.value = `http://localhost:8123/api/static/HTML_${appId}/`
     sending.value = false
     generating.value = false
   } catch (error) {
