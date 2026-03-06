@@ -6,7 +6,6 @@ import { getAppVoById, deployApp, deleteApp } from '@/api/appController'
 import { useLoginUserStore } from '@/stores/loginUser'
 
 const route = useRoute()
-// 修复点 1：补充实例化 router，否则下面调用 router.push 会报错
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
 const appId = route.params.id as string
@@ -55,6 +54,7 @@ const formatDateTime = (time?: string) => {
     return time
   }
 }
+
 // 预览相关
 const showPreview = ref(false)
 const previewUrl = ref('')
@@ -66,7 +66,6 @@ const fetchAppInfo = async () => {
     if (res.data.code === 0 && res.data.data) {
       app.value = res.data.data
       // 只有在非查看模式且是所有者时，才自动发送初始消息
-      // 添加延迟确保用户信息已加载
       setTimeout(() => {
         if (app.value?.initPrompt && !isViewOnly.value && isOwner.value) {
           inputText.value = app.value.initPrompt
@@ -173,7 +172,7 @@ const handleDeploy = async () => {
   } catch {
     message.error('部署失败')
   }
-} // 修复点 2：补上了这里缺失的右大括号
+}
 
 // 应用详情弹窗
 const showAppInfo = ref(false)
@@ -280,6 +279,7 @@ onMounted(() => {
           </div>
         </div>
       </div>
+
       <div v-if="showPreview" class="preview-section">
         <div class="preview-header">
           <span class="preview-title">预览效果</span>
@@ -288,14 +288,9 @@ onMounted(() => {
         <div class="preview-container">
           <iframe :src="previewUrl" class="preview-frame" />
         </div>
-
-    <!-- 应用详情弹窗 -->
-    <a-modal
-      v-model:open="showAppInfo"
-      title="应用详情"
-      :footer="null"
-      width="450px"
-    >
+      </div>
+    </div>
+    <a-modal v-model:open="showAppInfo" title="应用详情" :footer="null" width="450px">
       <div class="app-info-modal">
         <div class="info-item">
           <span class="info-label">创建者：</span>
@@ -401,5 +396,40 @@ onMounted(() => {
   width: 100%;
   height: 100%;
   border: none;
+}
+
+/* 修复点 3：补充弹窗所需的样式 */
+.app-info-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px 0;
+}
+.info-item {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+}
+.info-label {
+  color: #888;
+  width: 80px;
+  flex-shrink: 0;
+}
+.info-value {
+  color: #333;
+}
+.creator-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #333;
+}
+.action-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
 }
 </style>
