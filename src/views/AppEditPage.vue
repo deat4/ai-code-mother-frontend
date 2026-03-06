@@ -25,6 +25,11 @@ const formState = reactive({
   deployTime: '',
 })
 
+// 是否是管理员
+const isAdmin = computed(() => {
+  return loginUserStore.loginUser?.userRole === 'admin'
+})
+
 // 是否可以编辑（所有者或管理员）
 const canEdit = computed(() => {
   const user = loginUserStore.loginUser
@@ -126,13 +131,18 @@ onMounted(() => {
           </a-form-item>
 
           <a-form-item label="优先级">
-            <a-input-number
-              v-model:value="formState.priority"
-              :min="0"
-              :max="999"
-              style="width: 100%"
-            />
-            <div class="form-tip">设置为 99 表示精选应用</div>
+            <a-tooltip :title="!isAdmin ? '仅管理员可修改优先级' : ''">
+              <a-input-number
+                v-model:value="formState.priority"
+                :min="0"
+                :max="999"
+                style="width: 100%"
+                :disabled="!isAdmin"
+              />
+            </a-tooltip>
+            <div class="form-tip">
+              设置为 99 表示精选应用{{ !isAdmin ? '，仅管理员可修改' : '' }}
+            </div>
           </a-form-item>
 
           <a-form-item label="初始提示词">
