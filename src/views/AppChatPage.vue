@@ -1,18 +1,22 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { getAppVoById, deployApp, deleteApp } from '@/api/appController'
 import { useLoginUserStore } from '@/stores/loginUser'
+import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 
 const route = useRoute()
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
-const appId = route.params.id as string
 
-// 是否为只读模式（从精选页面点击进入）
+// 保持对路由参数的响应式追踪，避免手动赋值导致失去响应
+const appId = computed(() => route.params.id as string)
 const isViewOnly = computed(() => route.query.view === '1')
 const app = ref<API.AppVO>()
+
+// 定义消息列表的 DOM 引用，替代原生的 querySelector
+const messageListRef = ref<HTMLElement | null>(null)
 
 // 对话消息
 interface ChatMessage {
@@ -28,6 +32,10 @@ const inputText = ref('')
 const sending = ref(false)
 const generating = ref(false)
 
+// 预览相关
+const showPreview = ref(false)
+const previewUrl = ref('')
+
 // 是否是应用的所有者
 const isOwner = computed(() => {
   if (!app.value || !loginUserStore.loginUser.id) return false
@@ -36,6 +44,36 @@ const isOwner = computed(() => {
 
 // 是否可以编辑（非只读模式且是所有者）
 const canEdit = computed(() => !isViewOnly.value && isOwner.value)
+
+// 获取应用信息使用的定时器引用
+let initPromptTimeoutId: ReturnType<typeof setTimeout> | null = null
+
+// 重置组件状态
+const resetState = () => {
+  // 清除自动发送初始消息的定时器
+  if (initPromptTimeoutId) {
+    clearTimeout(initPromptTimeoutId)
+    initPromptTimeoutId = null
+  }
+  messages.value = []
+  app.value = undefined
+  inputText.value = ''
+  sending.value = false
+  generating.value = false
+  showPreview.value = false
+  previewUrl.value = ''
+}
+
+// 监听路由参数变化，处理从不同应用间导航
+watch(
+  () => route.params.id,
+  (newId, oldId) => {
+    if (newId && newId !== oldId) {
+      resetState()
+      fetchAppInfo()
+    }
+  },
+)
 
 // 格式化完整时间
 const formatDateTime = (time?: string) => {
@@ -55,18 +93,23 @@ const formatDateTime = (time?: string) => {
   }
 }
 
-// 预览相关
-const showPreview = ref(false)
-const previewUrl = ref('')
-
 // 获取应用信息
 const fetchAppInfo = async () => {
+  // 清除之前的定时器，防止竞态条件
+  if (initPromptTimeoutId) {
+    clearTimeout(initPromptTimeoutId)
+    initPromptTimeoutId = null
+  }
+
+  if (!appId.value) return
   try {
-    const res = await getAppVoById({ id: appId as unknown as number })
+    // 恢复使用 as unknown as number，保留字符串传值，防止雪花算法 ID 精度丢失！
+    const res = await getAppVoById({ id: appId.value as unknown as number })
     if (res.data.code === 0 && res.data.data) {
       app.value = res.data.data
       // 只有在非查看模式且是所有者时，才自动发送初始消息
-      setTimeout(() => {
+      initPromptTimeoutId = setTimeout(() => {
+        initPromptTimeoutId = null
         if (app.value?.initPrompt && !isViewOnly.value && isOwner.value) {
           inputText.value = app.value.initPrompt
           sendMessage()
@@ -106,7 +149,7 @@ const sendMessage = async () => {
   })
 
   try {
-    const url = `http://localhost:8123/api/app/chat/gen/code?appId=${encodeURIComponent(appId)}&message=${encodeURIComponent(currentInput)}`
+    const url = `${import.meta.env.VITE_API_BASE_URL}/app/chat/gen/code?appId=${encodeURIComponent(appId.value)}&message=${encodeURIComponent(currentInput)}`
     const response = await fetch(url, {
       method: 'GET',
       credentials: 'include',
@@ -118,8 +161,8 @@ const sendMessage = async () => {
     if (!reader) throw new Error('No reader available')
 
     const decoder = new TextDecoder()
-    const aiMsg = messages.value.find((m) => m.id === aiMessageId)
     let buffer = ''
+    let contentBuffer = '' // 累积的内容缓冲区
 
     while (true) {
       const { done, value } = await reader.read()
@@ -135,8 +178,20 @@ const sendMessage = async () => {
           const data = trimmedLine.slice(5).trim()
           try {
             const parsed = JSON.parse(data)
-            if (parsed.d && aiMsg) {
-              aiMsg.content += parsed.d
+            if (parsed.d) {
+              contentBuffer += parsed.d
+              // 通过索引直接更新数组元素，触发 Vue 响应式更新
+              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
+              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
+              if (targetMsg) {
+                targetMsg.content = contentBuffer
+              }
+              // 非阻塞滚动，不等待 DOM 更新完成
+              requestAnimationFrame(() => {
+                if (messageListRef.value) {
+                  messageListRef.value.scrollTop = messageListRef.value.scrollHeight
+                }
+              })
             }
           } catch {
             /* 忽略心跳或非JSON */
@@ -149,7 +204,7 @@ const sendMessage = async () => {
 
     // 生成结束后更新预览
     showPreview.value = true
-    previewUrl.value = `http://localhost:8123/api/preview/${app.value?.codeGenType || 'HTML'}_${appId}/`
+    previewUrl.value = `${import.meta.env.VITE_PREVIEW_DOMAIN}/${app.value?.codeGenType || 'HTML'}_${appId.value}/`
   } catch (error) {
     console.error('生成失败:', error)
     message.error('生成失败')
@@ -159,13 +214,18 @@ const sendMessage = async () => {
   }
 }
 
+// 部署成功弹窗
+const showDeployModal = ref(false)
+const deployUrl = ref('')
+
 // 部署应用
 const handleDeploy = async () => {
   try {
-    const res = await deployApp({ appId: appId as unknown as number })
+    // 防精度丢失修复
+    const res = await deployApp({ appId: appId.value as unknown as number })
     if (res.data.code === 0 && res.data.data) {
-      message.success('部署成功')
-      window.open(res.data.data, '_blank')
+      deployUrl.value = res.data.data
+      showDeployModal.value = true
     } else {
       message.error('部署失败')
     }
@@ -174,19 +234,32 @@ const handleDeploy = async () => {
   }
 }
 
+// 复制 URL
+const copyDeployUrl = () => {
+  navigator.clipboard.writeText(deployUrl.value)
+  message.success('已复制')
+}
+
+// 访问部署网站
+const visitDeployUrl = () => {
+  window.open(deployUrl.value, '_blank')
+}
+
 // 应用详情弹窗
 const showAppInfo = ref(false)
 
 // 删除应用
-const handleDeleteApp = async () => {
+const handleDeleteApp = () => {
   Modal.confirm({
-    title: '确认删除',
-    content: '确定要删除该应用吗？此操作不可恢复。',
-    okText: '确认',
+    title: '确定要删除此应用吗？',
+    content: '删除后无法恢复',
+    okText: '删除',
     cancelText: '取消',
+    okButtonProps: { danger: true },
     onOk: async () => {
       try {
-        const res = await deleteApp({ id: appId as unknown as number })
+        // 防精度丢失修复
+        const res = await deleteApp({ id: appId.value as unknown as number })
         if (res.data.code === 0) {
           message.success('删除成功')
           router.push('/')
@@ -202,7 +275,7 @@ const handleDeleteApp = async () => {
 
 // 编辑应用
 const handleEditApp = () => {
-  router.push(`/app/edit/${appId}`)
+  router.push(`/app/edit/${appId.value}`)
   showAppInfo.value = false
 }
 
@@ -231,15 +304,18 @@ onMounted(() => {
     </div>
 
     <div class="chat-content">
-      <div class="chat-section" :style="{ width: showPreview ? '50%' : '100%' }">
-        <div class="message-list">
+      <div class="chat-section" :style="{ width: showPreview ? '40%' : '100%' }">
+        <div class="message-list" ref="messageListRef">
           <div v-for="msg in messages" :key="msg.id" class="message-item" :class="msg.role">
             <div class="message-avatar">
               <a-avatar v-if="msg.role === 'user'" style="background-color: #1890ff">👤</a-avatar>
               <a-avatar v-else style="background-color: #52c41a">🤖</a-avatar>
             </div>
             <div class="message-content">
-              <div class="message-text">{{ msg.content }}</div>
+              <div class="message-text">
+                <MarkdownRenderer v-if="msg.role === 'assistant'" :content="msg.content" />
+                <template v-else>{{ msg.content }}</template>
+              </div>
               <div v-if="msg.files && msg.files.length > 0" class="message-files">
                 <div v-for="file in msg.files" :key="file.path" class="file-item">
                   <span class="file-icon">📄</span>
@@ -256,7 +332,7 @@ onMounted(() => {
             <div style="width: 100%">
               <a-textarea
                 v-model:value="inputText"
-                placeholder="描述生成需求..."
+                placeholder="请描述你想生成的网站，越详细效果越好哦"
                 :auto-size="{ minRows: 3, maxRows: 6 }"
                 :disabled="!canEdit"
                 @press-enter.prevent="sendMessage"
@@ -266,7 +342,6 @@ onMounted(() => {
           <div class="input-actions">
             <div class="left-actions">
               <a-button size="small" :disabled="!canEdit">📎 上传</a-button>
-              <a-button size="small" :disabled="!canEdit">✨ 优化</a-button>
             </div>
             <a-button
               type="primary"
@@ -286,10 +361,11 @@ onMounted(() => {
           <a-button size="small" type="link" @click="showPreview = false">关闭预览</a-button>
         </div>
         <div class="preview-container">
-          <iframe :src="previewUrl" class="preview-frame" />
+          <iframe :src="previewUrl" class="preview-frame"></iframe>
         </div>
       </div>
     </div>
+
     <a-modal v-model:open="showAppInfo" title="应用详情" :footer="null" width="450px">
       <div class="app-info-modal">
         <div class="info-item">
@@ -306,6 +382,33 @@ onMounted(() => {
         <div v-if="canEdit" class="action-buttons">
           <a-button type="primary" @click="handleEditApp">✏️ 修改</a-button>
           <a-button danger @click="handleDeleteApp">🗑️ 删除</a-button>
+        </div>
+      </div>
+    </a-modal>
+
+    <a-modal v-model:open="showDeployModal" :footer="null" width="480px" class="deploy-modal">
+      <div class="deploy-success-content">
+        <div class="success-icon">
+          <div class="icon-circle">
+            <span class="checkmark">✓</span>
+          </div>
+        </div>
+        <h3 class="deploy-title">网站部署成功！</h3>
+        <p class="deploy-subtitle">你的网站已经成功部署，可以通过以下链接访问：</p>
+        <div class="url-input-wrapper">
+          <a-input :value="deployUrl" readonly>
+            <template #addonAfter>
+              <a-tooltip title="复制链接">
+                <a-button type="link" @click="copyDeployUrl">
+                  <template #icon>📋</template>
+                </a-button>
+              </a-tooltip>
+            </template>
+          </a-input>
+        </div>
+        <div class="modal-actions">
+          <a-button type="primary" @click="visitDeployUrl">访问网站</a-button>
+          <a-button @click="showDeployModal = false">关 闭</a-button>
         </div>
       </div>
     </a-modal>
@@ -340,14 +443,17 @@ onMounted(() => {
 .chat-section {
   display: flex;
   flex-direction: column;
-  padding: 24px;
+  padding: 16px;
   transition: width 0.3s ease;
 }
+
 .message-list {
   flex: 1;
   overflow-y: auto;
-  padding-bottom: 24px;
-}
+  padding-bottom: 16px;
+  scroll-behavior: smooth;
+} /* 修复点：补充了这里缺失的闭合大括号 */
+
 .message-item {
   display: flex;
   gap: 12px;
@@ -383,12 +489,30 @@ onMounted(() => {
   gap: 8px;
 }
 .preview-section {
-  width: 50%;
+  width: 60%;
   background: #fff;
   border-left: 1px solid #f0f0f0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
 }
+
+/* 预览区头部样式 */
+.preview-header {
+  height: 48px;
+  padding: 0 16px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.preview-title {
+  font-weight: 600;
+  color: #333;
+}
+
 .preview-container {
   flex: 1;
 }
@@ -398,7 +522,7 @@ onMounted(() => {
   border: none;
 }
 
-/* 修复点 3：补充弹窗所需的样式 */
+/* 弹窗所需的样式 */
 .app-info-modal {
   display: flex;
   flex-direction: column;
@@ -431,5 +555,58 @@ onMounted(() => {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid #f0f0f0;
+}
+
+/* 部署成功弹窗样式 */
+.deploy-success-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 0;
+}
+
+.success-icon {
+  margin-bottom: 24px;
+}
+
+.icon-circle {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #52c41a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.checkmark {
+  font-size: 32px;
+  color: #fff;
+  font-weight: bold;
+}
+
+.deploy-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 8px;
+}
+
+.deploy-subtitle {
+  font-size: 14px;
+  color: #999;
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.url-input-wrapper {
+  width: 100%;
+  margin-bottom: 24px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
 }
 </style>

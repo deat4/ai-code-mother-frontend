@@ -11,8 +11,8 @@
 - **路由**: Vue Router 5
 - **UI 组件库**: Ant Design Vue 4
 - **HTTP 客户端**: Axios
+- **Markdown 渲染**: marked + highlight.js + dompurify
 - **代码规范**: ESLint + Prettier + oxlint
-
 ## 功能特性
 
 ### 用户系统
@@ -41,12 +41,53 @@
 - 全局头部（Logo + 导航菜单 + 用户信息）
 - 全局底部（版权信息）
 
+### 应用生成
+
+- AI 智能生成网站应用
+- SSE 流式传输实时预览
+- Markdown 内容渲染（代码高亮）
+- 部署成功弹窗提示
+
+### 预览功能
+
+- 实时预览生成的网站
+- 左右分栏布局（对话区 40% : 预览区 60%）
+
+## 快速开始
+### 应用生成
+
+- AI 智能生成网站应用
+- SSE 流式传输实时预览
+- Markdown 内容渲染（代码高亮）
+- 部署成功弹窗提示
+
+### 预览功能
+
+- 实时预览生成的网站
+- 左右分栏布局（对话区 40% : 预览区 60%）
+
 ## 快速开始
 
 ### 环境要求
 
 - Node.js `^20.19.0` 或 `>=22.12.0`
 - npm 或 pnpm
+
+### 环境变量配置
+
+复制 `.env.example` 为 `.env.development` 或 `.env.production`：
+
+```bash
+cp .env.example .env.development
+```
+
+环境变量说明：
+
+| 变量 | 说明 | 示例值 |
+|------|------|--------|
+| `VITE_API_BASE_URL` | 后端 API 地址 | `http://localhost:8123/api` |
+| `VITE_DEPLOY_DOMAIN` | 已部署应用访问域名 | `http://localhost:8123/api/static` |
+| `VITE_PREVIEW_DOMAIN` | 预览应用访问域名 | `http://localhost:8123/api/preview` |
 
 ### 安装依赖
 
@@ -61,6 +102,20 @@ npm run dev
 ```
 
 访问 http://localhost:5173
+
+### URL 构建规则
+
+**已部署应用：**
+```
+{VITE_DEPLOY_DOMAIN}/{deployKey}/
+示例: http://localhost:8123/api/static/aB3xYz/
+```
+
+**预览应用：**
+```
+{VITE_PREVIEW_DOMAIN}/{codeGenType}_{appId}/
+示例: http://localhost:8123/api/preview/HTML_1/
+```
 
 ### 生产构建
 
@@ -99,7 +154,8 @@ src/
 ├── api/                 # API 接口（自动生成）
 ├── components/          # 公共组件
 │   ├── GlobalHeader.vue
-│   └── GlobalFooter.vue
+│   ├── GlobalFooter.vue
+│   └── MarkdownRenderer.vue  # Markdown 渲染组件（支持代码高亮）
 ├── layouts/             # 布局组件
 │   └── BasicLayout.vue
 ├── router/              # 路由配置
@@ -158,6 +214,47 @@ src/
 export default {
   schemaPath: 'http://localhost:8123/api/v3/api-docs',
   serversPath: './src',
+}
+```
+
+### Markdown 渲染
+
+使用 `MarkdownRenderer.vue` 组件渲染 Markdown 内容，支持代码高亮：
+
+```vue
+<MarkdownRenderer :content="markdownText" />
+```
+
+特性：
+- Markdown 解析（marked）
+- 代码语法高亮（highlight.js）
+- XSS 安全过滤（DOMPurify）
+- 自动检测 JSON `{ "html": "..." }` 格式并提取 HTML
+- 直接渲染 HTML 内容（以 `<!DOCTYPE` 或 `<html` 开头）
+
+### SSE 流式传输
+
+后端使用 Server-Sent Events 返回流式数据，前端使用 Fetch API 的 ReadableStream 处理：
+
+```typescript
+const reader = response.body?.getReader()
+const decoder = new TextDecoder()
+let buffer = ''
+
+while (true) {
+  const { done, value } = await reader.read()
+  if (done) break
+  
+  buffer += decoder.decode(value, { stream: true })
+  const lines = buffer.split('\n')
+  buffer = lines.pop() || ''
+  
+  for (const line of lines) {
+    if (line.trim().startsWith('data:')) {
+      const data = line.trim().slice(5).trim()
+      // 处理数据
+    }
+  }
 }
 ```
 

@@ -11,10 +11,11 @@ import { message } from 'ant-design-vue'
  * Axios 实例配置
  */
 const DEFAULT_CONFIG: AxiosRequestConfig = {
-  baseURL: 'http://localhost:8123/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL,
   timeout: 60000,
   withCredentials: true,
 }
+
 
 /**
  * 创建 Axios 实例

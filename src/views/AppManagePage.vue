@@ -51,7 +51,7 @@ const fetchData = async () => {
       data.value = res.data.data.records ?? []
       total.value = res.data.data.totalRow ?? 0
     } else {
-      message.error('获取数据失败，' + (res.data.message ?? '未知错误'))
+      message.error('获取数据失败：' + (res.data.message ?? '未知错误'))
     }
   } catch {
     message.error('获取数据失败，请稍后重试')
@@ -66,10 +66,18 @@ const doSearch = () => {
   fetchData()
 }
 
-// 表格变化处理
-const doTableChange = (page: { current: number; pageSize: number }) => {
-  searchParams.current = page.current
-  searchParams.pageSize = page.pageSize
+// 重置搜索
+const handleReset = () => {
+  searchParams.appName = undefined
+  searchParams.codeGenType = undefined
+  searchParams.priority = undefined
+  doSearch()
+}
+
+// 表格分页/筛选/排序变化处理
+const doTableChange = (pag: { current?: number; pageSize?: number }) => {
+  searchParams.current = pag.current
+  searchParams.pageSize = pag.pageSize
   fetchData()
 }
 
@@ -82,7 +90,7 @@ const doDelete = async (id: number) => {
       message.success('删除成功')
       fetchData()
     } else {
-      message.error('删除失败，' + (res.data.message ?? '未知错误'))
+      message.error('删除失败：' + (res.data.message ?? '未知错误'))
     }
   } catch {
     message.error('删除失败，请稍后重试')
@@ -130,20 +138,39 @@ onMounted(() => {
 
 <template>
   <div class="app-manage-page">
-    <!-- 搜索表单 -->
     <a-form layout="inline" :model="searchParams" @finish="doSearch">
       <a-form-item label="应用名称">
-        <a-input v-model:value="searchParams.appName" placeholder="输入应用名称" allow-clear />
+        <a-input v-model:value="searchParams.appName" placeholder="请输入应用名称" allow-clear />
+      </a-form-item>
+      <a-form-item label="生成类型">
+        <a-select
+          v-model:value="searchParams.codeGenType"
+          placeholder="全部"
+          allow-clear
+          style="width: 150px"
+        >
+          <a-select-option value="html">HTML</a-select-option>
+          <a-select-option value="multi_file">多文件</a-select-option>
+        </a-select>
       </a-form-item>
       <a-form-item label="优先级">
-        <a-input-number v-model:value="searchParams.priority" placeholder="优先级" />
+        <a-input-number
+          v-model:value="searchParams.priority"
+          placeholder="优先级"
+          style="width: 100px"
+        />
       </a-form-item>
+
       <a-form-item>
-        <a-button type="primary" html-type="submit">搜索</a-button>
+        <a-space>
+          <a-button type="primary" html-type="submit">搜索</a-button>
+          <a-button @click="handleReset">重置</a-button>
+        </a-space>
       </a-form-item>
     </a-form>
+
     <a-divider />
-    <!-- 表格 -->
+
     <a-table
       :columns="columns"
       :data-source="data"
@@ -164,9 +191,9 @@ onMounted(() => {
           <a-space>
             <a-button type="link" size="small" @click="handleEdit(record.id)">编辑</a-button>
             <a-button type="link" size="small" @click="handleSetGood(record)">精选</a-button>
-            <a-button danger type="link" size="small" @click="handleDelete(record.id)">
-              删除
-            </a-button>
+            <a-button danger type="link" size="small" @click="handleDelete(record.id)"
+              >删除</a-button
+            >
           </a-space>
         </template>
       </template>
