@@ -364,3 +364,48 @@ timeoutId = setTimeout(() => {
   // Do something
 }, 100)
 ```
+
+## Chat History Loading
+
+When loading chat history on page entry:
+
+```typescript
+// Load history from API
+const res = await listAppChatHistory({
+  appId: appId.value,
+  lastCreateTime: loadMore ? oldestMessageTime.value : undefined,
+  pageSize: 10,
+})
+
+// Important: Data is in res.data.data.records (paginated response)
+const historyList = res.data.data.records || []
+
+// Reverse because backend returns newest first
+historyMessages.reverse()
+```
+
+## AI Generation Stop
+
+To stop AI generation mid-stream:
+
+```typescript
+// Save sessionId from SSE event
+if (parsed.sessionId) {
+  currentSessionId.value = parsed.sessionId
+}
+
+// Stop generation
+await stopGeneration({ sessionId: currentSessionId.value })
+```
+
+## Version Management
+
+Components:
+- `VersionList.vue` - List all versions
+- `VersionDiff.vue` - Compare two versions
+
+API:
+- `listAppVersions` - Get version list
+- `diffVersions` - Compare versions
+- `rollbackToVersion` - Rollback to specific version
+```

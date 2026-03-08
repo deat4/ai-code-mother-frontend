@@ -29,6 +29,12 @@ export const routes: RouteRecordRaw[] = [
     meta: { title: '应用管理', access: ACCESS_ENUM.ADMIN },
   },
   {
+    path: '/admin/chatHistoryManage',
+    name: '对话管理',
+    component: () => import('@/views/ChatHistoryManagePage.vue'),
+    meta: { title: '对话管理', access: ACCESS_ENUM.ADMIN },
+  },
+  {
     path: '/user/login',
     name: '用户登录',
     component: () => import('@/views/UserLoginPage.vue'),
