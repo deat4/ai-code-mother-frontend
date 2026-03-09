@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { addApp, listMyAppVoByPage, listGoodAppVoByPage } from '@/api/appController'
 
 const router = useRouter()
+const route = useRoute()
 
 // 提示词输入
 const promptText = ref('')
@@ -32,19 +33,23 @@ const goodAppsParams = reactive({
 const quickPrompts = [
   {
     label: '个人博客',
-    value: '个人博客：设计一个简洁优雅的个人博客网站，包含文章列表、分类标签、搜索功能，以及文章详情页的评论区。整体风格偏向现代简约，支持响应式布局。',
+    value:
+      '个人博客：设计一个简洁优雅的个人博客网站，包含文章列表、分类标签、搜索功能，以及文章详情页的评论区。整体风格偏向现代简约，支持响应式布局。',
   },
   {
     label: '企业官网',
-    value: '企业官网：创建一个专业的企业官网，包含首页轮播、关于我们、产品展示、新闻动态、联系方式等模块。配色采用深蓝色系，体现企业形象和专业感。',
+    value:
+      '企业官网：创建一个专业的企业官网，包含首页轮播、关于我们、产品展示、新闻动态、联系方式等模块。配色采用深蓝色系，体现企业形象和专业感。',
   },
   {
     label: '电商购物',
-    value: '电商购物：设计一个现代化的电商购物平台，包含商品列表、分类筛选、购物车、结算流程等核心功能。界面风格简洁大气，突出商品展示效果。',
+    value:
+      '电商购物：设计一个现代化的电商购物平台，包含商品列表、分类筛选、购物车、结算流程等核心功能。界面风格简洁大气，突出商品展示效果。',
   },
   {
     label: '在线教育',
-    value: '在线教育：开发一个在线教育平台，包含课程列表、视频播放、学习进度跟踪、讨论区等功能。界面风格清新活泼，适合学习场景，支持移动端适配。',
+    value:
+      '在线教育：开发一个在线教育平台，包含课程列表、视频播放、学习进度跟踪、讨论区等功能。界面风格清新活泼，适合学习场景，支持移动端适配。',
   },
 ]
 
@@ -63,7 +68,8 @@ const handleCreateApp = async () => {
     })
     if (res.data.code === 0 && res.data.data) {
       message.success('应用创建成功')
-      router.push(`/app/chat/${res.data.data}`)
+      // 防御雪花 ID 精度丢失
+      router.push(`/app/chat/${String(res.data.data)}`)
     } else {
       message.error('创建失败：' + (res.data.message ?? '未知错误'))
     }
@@ -100,7 +106,8 @@ const loadGoodApps = async () => {
   }
 }
 
-const goToChat = (appId: number | string, viewOnly: boolean = false) => {
+// 强制入参类型为 string 防御雪花 ID 问题
+const goToChat = (appId: string, viewOnly: boolean = false) => {
   const url = `/app/chat/${appId}${viewOnly ? '?view=1' : ''}`
   router.push(url)
 }
@@ -161,6 +168,16 @@ onMounted(() => {
   loadMyApps()
   loadGoodApps()
 })
+
+// 监听路由变化，返回主页时刷新应用列表
+watch(
+  () => route.path,
+  (newPath) => {
+    if (newPath === '/') {
+      loadMyApps()
+    }
+  },
+)
 </script>
 
 <template>
@@ -208,7 +225,9 @@ onMounted(() => {
             <img v-if="app.cover" :src="app.cover" :alt="app.appName" />
             <div v-else class="cover-placeholder"><span>📱</span></div>
             <div class="card-actions">
-              <a-button type="primary" @click="app.id && goToChat(app.id)">查看对话</a-button>
+              <a-button type="primary" @click="app.id && goToChat(String(app.id))"
+                >查看对话</a-button
+              >
               <a-button v-if="app.deployKey" @click="openDeployUrl(app)">查看作品</a-button>
             </div>
           </div>
@@ -228,7 +247,7 @@ onMounted(() => {
             <div class="card-actions">
               <a-space direction="vertical" style="width: 100%">
                 <a-space style="width: 100%; justify-content: center">
-                  <a-button type="primary" @click="app.id && goToChat(app.id, true)"
+                  <a-button type="primary" @click="app.id && goToChat(String(app.id), true)"
                     >查看详情</a-button
                   >
                   <a-button @click="openAppInfo(app)">📋 信息</a-button>
@@ -247,6 +266,7 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
     <a-modal
       v-model:open="showAppInfoModal"
       :title="selectedApp?.appName ?? '应用详情'"
@@ -267,6 +287,9 @@ onMounted(() => {
         </div>
         <div class="info-row">
           <span class="info-label">应用描述</span>
+          <div class="info-desc">
+            {{ selectedApp.initPrompt || selectedApp.appDesc || '暂无描述' }}
+          </div>
         </div>
       </div>
     </a-modal>
@@ -278,7 +301,7 @@ onMounted(() => {
   width: 100%;
   min-height: 100vh;
   background-color: #f5f8ff;
-  background-image: 
+  background-image:
     linear-gradient(rgba(107, 95, 255, 0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(107, 95, 255, 0.03) 1px, transparent 1px);
   background-size: 40px 40px;
@@ -296,7 +319,7 @@ onMounted(() => {
 .title {
   font-size: 48px;
   font-weight: 800;
-  color: #6B5FFF;
+  color: #6b5fff;
   margin-bottom: 12px;
 }
 
@@ -349,8 +372,8 @@ onMounted(() => {
 }
 
 .quick-prompts :deep(.ant-btn:hover) {
-  border-color: #6B5FFF;
-  color: #6B5FFF;
+  border-color: #6b5fff;
+  color: #6b5fff;
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(107, 95, 255, 0.15);
 }
@@ -366,7 +389,6 @@ onMounted(() => {
   font-weight: 600;
   margin-bottom: 24px;
 }
-
 
 .apps-grid {
   display: grid;
@@ -509,10 +531,3 @@ onMounted(() => {
   word-break: break-all;
 }
 </style>
-  border-radius: 8px;
-  color: #333;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-

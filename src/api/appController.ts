@@ -56,20 +56,18 @@ export async function listAppVoByPageByAdmin(
   })
 }
 
-/** 此处后端没有提供注释 POST /app/admin/update */
-export async function updateAppByAdmin(
-  body: API.AppUpdateAdminRequest,
+export async function deployApp(
+  // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
+  params: API.deployAppParams,
   options?: { [key: string]: any }
 ) {
-  return request<API.BaseResponseBoolean>('/app/admin/update', {
+  return request<API.BaseResponseString>(`/app/deploy`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    data: body,
+    params: { ...params },
     ...(options || {}),
   })
 }
+
 
 /** 此处后端没有提供注释 GET /app/chat/gen/code */
 export async function chatToGenCode(

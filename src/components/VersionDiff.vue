@@ -1,118 +1,102 @@
 <template>
   <div class="version-diff">
-    <div class="diff-header">
-      <div class="diff-info">
-        <span class="diff-label">
+    <!-- 统计信息 -->
+    <div class="diff-stats-bar">
+      <div class="stat-item">
+        <span class="stat-label">新增:</span>
+        <span class="stat-value addition">+{{ stats.additions || 0 }} 行</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">删除:</span>
+        <span class="stat-value deletion">-{{ stats.deletions || 0 }} 行</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">总行数:</span>
+        <span class="stat-value">{{ stats.totalLines || 0 }} 行</span>
+      </div>
+    </div>
+
+    <!-- 左右对比容器 -->
+    <div class="diff-container">
+      <!-- 左侧：旧版本 -->
+      <div class="diff-pane">
+        <div class="pane-header">
           <a-tag color="red">{{ oldVersionName }}</a-tag>
-        </span>
-        <span class="diff-stats">
-          <span class="removal" v-if="stats.deletions > 0">
-            <minus-outlined /> {{ stats.deletions }} removal
-          </span>
-        </span>
+          <span class="line-count">{{ oldLineCount }} 行</span>
+          <a-button size="small" @click="copyContent('old')">复制</a-button>
+        </div>
+        <div class="pane-content">
+          <pre><code v-html="oldContentHtml"></code></pre>
+        </div>
       </div>
-      <div class="diff-lines">
-        <span>{{ oldLineCount }} lines</span>
-        <a-button size="small" @click="copyContent('old')">Copy</a-button>
-      </div>
-    </div>
 
-    <div class="diff-body">
-      <div class="diff-pane diff-pane-old">
-        <div class="diff-content" v-html="oldContentHtml"></div>
-      </div>
-    </div>
-
-    <div class="diff-header" style="margin-top: 16px">
-      <div class="diff-info">
-        <span class="diff-label">
+      <!-- 右侧：新版本 -->
+      <div class="diff-pane">
+        <div class="pane-header">
           <a-tag color="green">{{ newVersionName }}</a-tag>
-        </span>
-        <span class="diff-stats">
-          <span class="addition" v-if="stats.additions > 0">
-            <plus-outlined /> {{ stats.additions }} additions
-          </span>
-        </span>
-      </div>
-      <div class="diff-lines">
-        <span>{{ newLineCount }} lines</span>
-        <a-button size="small" @click="copyContent('new')">Copy</a-button>
-      </div>
-    </div>
-
-    <div class="diff-body">
-      <div class="diff-pane diff-pane-new">
-        <div class="diff-content" v-html="newContentHtml"></div>
+          <span class="line-count">{{ newLineCount }} 行</span>
+          <a-button size="small" @click="copyContent('new')">复制</a-button>
+        </div>
+        <div class="pane-content">
+          <pre><code v-html="newContentHtml"></code></pre>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
+<script setup lang="ts">
 import { computed } from 'vue'
 import { message } from 'ant-design-vue'
-import { MinusOutlined, PlusOutlined } from '@ant-design/icons-vue'
-import { computed, ref } from 'vue'
-import { message } from 'ant-design-vue'
-import { MinusOutlined, PlusOutlined } from '@ant-design/icons-vue'
 
 interface Props {
   oldVersionName: string
   newVersionName: string
-  oldContent?: string
-  newContent?: string
   diffResult?: API.VersionDiff
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  oldContent: '',
-  newContent: '',
-})
+const props = defineProps<Props>()
 
 // 统计信息
 const stats = computed(() => {
-  const s = props.diffResult?.stats || { additions: 0, deletions: 0, changes: 0 }
-  return s
+  return props.diffResult?.stats || { additions: 0, deletions: 0, changes: 0, totalLines: 0 }
 })
 
 // 行数统计
 const oldLineCount = computed(() => {
-  const content = props.diffResult?.oldContent || props.oldContent
+  const content = props.diffResult?.oldContent || ''
   return content ? content.split('\n').length : 0
 })
 
 const newLineCount = computed(() => {
-  const content = props.diffResult?.newContent || props.newContent
+  const content = props.diffResult?.newContent || ''
   return content ? content.split('\n').length : 0
 })
 
-// 显示的内容（带行号和差异高亮）
+// 旧版本内容 HTML
 const oldContentHtml = computed(() => {
-  const content = props.diffResult?.oldContent || props.oldContent
-  return renderDiffContent(content, 'old')
+  const content = props.diffResult?.oldContent || ''
+  return renderContent(content)
 })
 
+// 新版本内容 HTML
 const newContentHtml = computed(() => {
-  const content = props.diffResult?.newContent || props.newContent
-  return renderDiffContent(content, 'new')
+  const content = props.diffResult?.newContent || ''
+  return renderContent(content)
 })
 
-// 渲染差异内容
-const renderDiffContent = (content?: string, type?: 'old' | 'new') => {
+// 渲染内容（带行号）
+const renderContent = (content: string) => {
   if (!content) return ''
 
   const lines = content.split('\n')
-  const html = lines
+  return lines
     .map((line, index) => {
       const lineNum = index + 1
-      // 如果有 diffHtml，直接使用后端返回的差异 HTML
-      if (props.diffResult?.diffHtml) {
-        return `<div class="diff-line">${lineNum}: ${escapeHtml(line)}</div>`
-      }
-      return `<div class="diff-line">${lineNum}: ${escapeHtml(line)}</div>`
+      const escapedLine = escapeHtml(line)
+      return `<span class="line-number">${lineNum}</span>${escapedLine}`
     })
-    .join('')
-
-  return html
+    .join('\n')
 }
 
 // HTML 转义
@@ -124,10 +108,7 @@ const escapeHtml = (html: string) => {
 
 // 复制内容
 const copyContent = async (type: 'old' | 'new') => {
-  const content =
-    type === 'old'
-      ? props.diffResult?.oldContent || props.oldContent
-      : props.diffResult?.newContent || props.newContent
+  const content = type === 'old' ? props.diffResult?.oldContent : props.diffResult?.newContent
 
   try {
     await navigator.clipboard.writeText(content || '')
@@ -140,105 +121,123 @@ const copyContent = async (type: 'old' | 'new') => {
 
 <style scoped>
 .version-diff {
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
-  font-size: 13px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
-.diff-header {
+/* 统计信息栏 */
+.diff-stats-bar {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  gap: 24px;
   padding: 12px 16px;
   background: #f6f8fa;
   border-bottom: 1px solid #e1e4e8;
 }
 
-.diff-info {
+.stat-item {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
-.diff-label {
-  font-weight: 600;
-}
-
-.diff-stats {
-  display: flex;
-  gap: 16px;
+.stat-label {
   color: #586069;
-  font-size: 12px;
+  font-size: 13px;
 }
 
-.diff-stats .removal {
-  color: #cb2431;
+.stat-value {
+  font-weight: 600;
+  font-size: 13px;
 }
 
-.diff-stats .addition {
+.stat-value.addition {
   color: #28a745;
 }
 
-.diff-lines {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: #586069;
+.stat-value.deletion {
+  color: #cb2431;
 }
 
-.diff-body {
-  border: 1px solid #e1e4e8;
-  border-top: none;
+/* 左右对比容器 */
+.diff-container {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
 }
 
 .diff-pane {
-  overflow-x: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e1e4e8;
+}
+
+.diff-pane:last-child {
+  border-right: none;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #fafbfc;
+  border-bottom: 1px solid #e1e4e8;
+}
+
+.line-count {
+  font-size: 12px;
+  color: #586069;
+}
+
+.pane-content {
+  flex: 1;
+  overflow: auto;
   background: #fff;
 }
 
-.diff-content {
-  min-height: 200px;
-}
-
-.diff-line {
-  display: flex;
-  padding: 2px 8px;
+.pane-content pre {
+  margin: 0;
+  padding: 8px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+  font-size: 12px;
   line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
-.diff-line::before {
-  content: attr(data-line-number);
+.pane-content code {
+  display: block;
+}
+
+/* 行号 */
+:deep(.line-number) {
   display: inline-block;
-  min-width: 50px;
-  padding-right: 16px;
+  min-width: 40px;
+  margin-right: 16px;
+  color: #6a737d;
   text-align: right;
-  color: #1b1f23;
   user-select: none;
-}
-
-/* 差异高亮 */
-.diff-line-removed {
-  background-color: #ffeef0;
-}
-
-.diff-line-added {
-  background-color: #e6ffed;
+  opacity: 0.7;
 }
 
 /* 滚动条样式 */
-.diff-content::-webkit-scrollbar {
+.pane-content::-webkit-scrollbar {
+  width: 8px;
   height: 8px;
 }
 
-.diff-content::-webkit-scrollbar-track {
+.pane-content::-webkit-scrollbar-track {
   background: #f6f8fa;
 }
 
-.diff-content::-webkit-scrollbar-thumb {
+.pane-content::-webkit-scrollbar-thumb {
   background: #d1d5da;
   border-radius: 4px;
 }
 
-.diff-content::-webkit-scrollbar-thumb:hover {
+.pane-content::-webkit-scrollbar-thumb:hover {
   background: #959da5;
 }
 </style>

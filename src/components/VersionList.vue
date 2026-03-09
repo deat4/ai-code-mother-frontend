@@ -1,5 +1,18 @@
 <template>
   <div class="version-list">
+    <div class="version-toolbar">
+      <div class="toolbar-left">
+        <span v-if="selectedCount > 0" class="selection-info">
+          已选择 {{ selectedCount }} 个版本
+        </span>
+      </div>
+      <div class="toolbar-right">
+        <a-button type="primary" :disabled="selectedCount !== 2" @click="handleBatchCompare">
+          对比选中的版本 ({{ selectedCount }}/2)
+        </a-button>
+      </div>
+    </div>
+
     <a-table
       :columns="columns"
       :data-source="versions"
@@ -7,33 +20,35 @@
       :pagination="pagination"
       row-key="id"
       size="small"
+      @change="handleTableChange"
     >
       <template #bodyCell="{ column, record }">
-        <!-- 版本号 -->
         <template v-if="column.key === 'versionNumber'">
-          <a-tag :color="record.versionNumber === currentVersion ? 'blue' : 'default'">
-            v{{ record.versionNumber }}
-          </a-tag>
+          <div class="version-cell">
+            <a-checkbox
+              :checked="!!selectedVersions[String(record.id)]"
+              @change="(e) => handleVersionSelect(String(record.id), e.target.checked)"
+            />
+            <a-tag :color="record.versionNumber === currentVersion ? 'blue' : 'default'">
+              v{{ record.versionNumber }}
+            </a-tag>
+          </div>
         </template>
 
-        <!-- 版本名称 -->
         <template v-else-if="column.key === 'versionName'">
           <span>{{ record.versionName || `版本 ${record.versionNumber}` }}</span>
         </template>
 
-        <!-- 变更类型 -->
         <template v-else-if="column.key === 'changeType'">
           <a-tag :color="getChangeTypeColor(record.changeType)">
             {{ getChangeTypeText(record.changeType) }}
           </a-tag>
         </template>
 
-        <!-- 创建时间 -->
         <template v-else-if="column.key === 'createdAt'">
           {{ formatTime(record.createdAt) }}
         </template>
 
-        <!-- 操作 -->
         <template v-else-if="column.key === 'action'">
           <a-space>
             <a-button
@@ -62,52 +77,54 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import type { ColumnsType } from 'ant-design-vue/es/table'
+import { ref, watch, computed } from 'vue'
+import type { ColumnsType, TablePaginationConfig } from 'ant-design-vue/es/table'
 import { message, Modal } from 'ant-design-vue'
-import { listAppVersions, rollbackToVersion } from '@/api/versionController'
-import type { AppVersion } from '../../api/versionTypes'
+import { listVersionsPage, rollbackToVersion } from '@/api/appVersionController'
+import type { AppVersion } from '@/api/versionTypes'
 
 interface Props {
-
-  appId: number
+  // 核心修复：业务主键 appId 必须是 string，防止雪花 ID 精度丢失
+  appId: string
+  // 假设 currentVersion 是常规自增版本号(如 1, 2, 3)。如果它也是雪花ID，请一并改为 string
   currentVersion: number
 }
 
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  compare: [version: AppVersion]
+  compare: [version: AppVersion, targetVersion?: AppVersion]
   view: [version: AppVersion]
   rollback: [version: AppVersion]
 }>()
 
 const versions = ref<AppVersion[]>([])
 const loading = ref(false)
+// 统一使用 string 类型的 key 来存储选中状态
+const selectedVersions = ref<Record<string, boolean>>({})
+const selectedCount = computed(() => Object.values(selectedVersions.value).filter(Boolean).length)
 
-// 分页
-const pagination = ref({
+// 分页配置
+const pagination = ref<TablePaginationConfig>({
   current: 1,
   pageSize: 10,
   total: 0,
-  showSizeChanger: false,
-  showTotal: (total: number) => `共 ${total} 个版本`,
+  showSizeChanger: true,
 })
 
-// 表格列定义
 const columns: ColumnsType<AppVersion> = [
   {
     title: '版本号',
     dataIndex: 'versionNumber',
     key: 'versionNumber',
-    width: 100,
-    sorter: (a, b) => (a.versionNumber || 0) - (b.versionNumber || 0),
+    width: 120,
+    sorter: (a: any, b: any) => (a.versionNumber || 0) - (b.versionNumber || 0),
   },
   {
     title: '版本名称',
     dataIndex: 'versionName',
     key: 'versionName',
-    ellipsis: true,
+    width: 150,
   },
   {
     title: '变更类型',
@@ -126,7 +143,7 @@ const columns: ColumnsType<AppVersion> = [
     dataIndex: 'createdAt',
     key: 'createdAt',
     width: 180,
-    sorter: (a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''),
+    sorter: (a: any, b: any) => (a.createdAt || '').localeCompare(b.createdAt || ''),
   },
   {
     title: '操作',
@@ -138,9 +155,11 @@ const columns: ColumnsType<AppVersion> = [
 
 // 加载版本列表
 const loadVersions = async () => {
+  if (!props.appId) return
+
   loading.value = true
   try {
-    const res = await listAppVersions({
+    const res = await listVersionsPage({
       appId: props.appId,
       current: pagination.value.current,
       pageSize: pagination.value.pageSize,
@@ -158,49 +177,77 @@ const loadVersions = async () => {
   }
 }
 
-// 处理对比
-const handleCompare = (record: AppVersion) => {
-  emit('compare', record)
+// 处理表格翻页和变动
+const handleTableChange = (pag: TablePaginationConfig) => {
+  pagination.value.current = pag.current || 1
+  pagination.value.pageSize = pag.pageSize || 10
+  loadVersions()
 }
 
-// 处理查看
-const handleView = (record: AppVersion) => {
-  emit('view', record)
+// 版本选择处理（强制入参 id 为 string）
+const handleVersionSelect = (id: string, checked: boolean) => {
+  if (checked && selectedCount.value >= 2) {
+    message.warning('最多只能选择 2 个版本进行对比')
+    return
+  }
+  selectedVersions.value[id] = checked
 }
 
-// 处理回退
-const handleRollback = async (record: AppVersion) => {
-  if (!record.versionNumber) return
+// 批量对比
+const handleBatchCompare = () => {
+  const selected = Object.entries(selectedVersions.value)
+    .filter(([, checked]) => checked)
+    // 强制转换为 string 进行比对
+    .map(([id]) => versions.value.find((v) => String(v.id) === id))
+    .filter(Boolean) as AppVersion[]
 
+  if (selected.length !== 2) {
+    message.warning('请选择 2 个版本进行对比')
+    return
+  }
+
+  emit('compare', selected[0], selected[1])
+}
+
+// 单个版本对比
+const handleCompare = (version: AppVersion) => {
+  emit('compare', version)
+}
+
+// 查看版本详情
+const handleView = (version: AppVersion) => {
+  emit('view', version)
+}
+
+// 回退版本
+const handleRollback = async (version: AppVersion) => {
   Modal.confirm({
     title: '确认回退',
-    content: `确定要回退到版本 ${record.versionNumber} 吗？回退后当前版本之后的所有版本将被保留但不会生效。`,
-    okText: '确认回退',
+    content: `确定要回退到版本 v${version.versionNumber} 吗？`,
+    okText: '确认',
     cancelText: '取消',
-    okButtonProps: { danger: true },
     onOk: async () => {
       try {
         const res = await rollbackToVersion({
           appId: props.appId,
-          targetVersion: record.versionNumber,
+          targetVersion: version.versionNumber, // 注意这里传的是 versionNumber 还是 id，根据你的后端接口定
         })
 
         if (res.data.code === 0) {
           message.success('回退成功')
-          emit('rollback', record)
           loadVersions()
+          emit('rollback', version)
         } else {
-          message.error(res.data.message || '回退失败')
+          message.error('回退失败')
         }
-      } catch (error) {
-        console.error('回退失败:', error)
+      } catch {
         message.error('回退失败')
       }
     },
   })
 }
 
-// 获取变更类型颜色
+// 变更类型颜色
 const getChangeTypeColor = (type?: string) => {
   const colors: Record<string, string> = {
     CREATE: 'green',
@@ -210,7 +257,7 @@ const getChangeTypeColor = (type?: string) => {
   return colors[type || 'UPDATE'] || 'default'
 }
 
-// 获取变更类型文本
+// 变更类型文本
 const getChangeTypeText = (type?: string) => {
   const texts: Record<string, string> = {
     CREATE: '创建',
@@ -238,7 +285,16 @@ const formatTime = (time?: string) => {
 }
 
 // 监听应用 ID 变化
-watch(() => props.appId, loadVersions, { immediate: true })
+watch(
+  () => props.appId,
+  () => {
+    // 切换应用时，重置分页和选中状态，避免数据错乱
+    pagination.value.current = 1
+    selectedVersions.value = {}
+    loadVersions()
+  },
+  { immediate: true },
+)
 
 // 暴露加载方法
 defineExpose({
@@ -251,13 +307,35 @@ defineExpose({
   background: #fff;
   border-radius: 8px;
 }
-</style>
-sions,
-})
 
-<style scoped>
-.version-list {
-  background: #fff;
-  border-radius: 8px;
+/* 顶部操作栏 */
+.version-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.toolbar-left {
+  flex: 1;
+}
+
+.selection-info {
+  font-size: 14px;
+  color: #1890ff;
+  font-weight: 500;
+}
+
+.toolbar-right {
+  display: flex;
+  gap: 8px;
+}
+
+/* 版本单元格 */
+.version-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>

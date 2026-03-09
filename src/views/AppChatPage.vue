@@ -2,26 +2,28 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
-import { getAppVoById, deleteApp, stopGeneration } from '@/api/appController'
+import { getAppVoById, deleteApp, stopGeneration, deployApp } from '@/api/appController'
 import { listAppChatHistory } from '@/api/chatHistoryController'
-
 import { diffVersions } from '@/api/appVersionController'
 import { useLoginUserStore } from '@/stores/loginUser'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
+import VersionList from '@/components/VersionList.vue'
+import VersionDiff from '@/components/VersionDiff.vue'
 
 const route = useRoute()
 const router = useRouter()
 const loginUserStore = useLoginUserStore()
 
-// 保持对路由参数的响应式追踪，避免手动赋值导致失去响应
+// 恢复 appId 的响应式，防止路由参数变化时失效和 undefined 报错
 const appId = computed(() => route.params.id as string)
+
 const isViewOnly = computed(() => route.query.view === '1')
 const app = ref<API.AppVO>()
 
 // 定义消息列表的 DOM 引用，替代原生的 querySelector
 const messageListRef = ref<HTMLElement | null>(null)
 
-// 对话消息
+// 补全刚才被意外截断的 ChatMessage 接口定义
 interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -43,15 +45,13 @@ const pageSize = 10
 const totalHistoryCount = ref(0)
 
 // AI 生成相关
-const currentSessionId = ref<string | null>(null)  // 当前生成会话 ID
-
-// 预览相关
+const currentSessionId = ref<string | null>(null) // 当前生成会话 ID
 
 // 预览相关
 const showPreview = ref(false)
 const previewUrl = ref('')
 
-// 是否是应用的所有者
+// 是否是应用的所有者（保留 String 强转，应对后端的 Number 精度问题）
 const isOwner = computed(() => {
   if (!app.value || !loginUserStore.loginUser.id) return false
   return String(app.value.userId) === String(loginUserStore.loginUser.id)
@@ -82,6 +82,7 @@ const resetState = () => {
   loadingHistory.value = false
   oldestMessageTime.value = null
   totalHistoryCount.value = 0
+  currentSessionId.value = null
 }
 
 // 监听路由参数变化，处理从不同应用间导航
@@ -123,8 +124,8 @@ const fetchAppInfo = async () => {
 
   if (!appId.value) return
   try {
-    // 恢复使用 as unknown as number，保留字符串传值，防止雪花算法 ID 精度丢失！
-    const res = await getAppVoById({ id: appId.value as unknown as number })
+    // 替换 as unknown as number 为 as any，避免语义误导，同时骗过 TS 类型检查。建议修改 API 定义为 string。
+    const res = await getAppVoById({ id: appId.value as any })
     if (res.data.code === 0 && res.data.data) {
       app.value = res.data.data
 
@@ -160,7 +161,7 @@ const loadChatHistory = async (loadMore = false) => {
   loadingHistory.value = true
   try {
     const res = await listAppChatHistory({
-      appId: appId.value as unknown as number,
+      appId: appId.value as any,
       lastCreateTime: loadMore ? oldestMessageTime.value || undefined : undefined,
       pageSize,
     })
@@ -170,11 +171,8 @@ const loadChatHistory = async (loadMore = false) => {
 
       if (historyList.length > 0) {
         // 转换为 ChatMessage 格式
-
-
-        // 转换为 ChatMessage 格式
         const historyMessages: ChatMessage[] = historyList.map((item) => ({
-          id: String(item.id),
+          id: String(item.id), // 保留强转 String，防止雪花 ID 问题
           role: item.messageType === 'user' ? 'user' : 'assistant',
           content: item.message || '',
           createTime: item.createTime || '',
@@ -193,7 +191,6 @@ const loadChatHistory = async (loadMore = false) => {
         }
 
         // 关键：更新游标为当前已加载消息中最老的那条的创建时间
-        // messages.value[0] 是最老的消息（因为已经反转且按老消息在前排列）
         oldestMessageTime.value = messages.value[0]?.createTime || null
 
         // 判断是否还有更多历史
@@ -296,13 +293,11 @@ const sendMessage = async () => {
         } else if (trimmedLine.startsWith('event:done')) {
           // 生成完成，清除 sessionId
           currentSessionId.value = null
+          // 版本创建由后端自动完成，前端无需调用
         }
       }
     }
 
-    // 生成结束后更新预览（添加时间戳强制刷新）
-
-    // 生成结束后更新预览（添加时间戳强制刷新）
     showPreview.value = true
     previewUrl.value = `${import.meta.env.VITE_PREVIEW_DOMAIN}/${app.value?.codeGenType || 'HTML'}_${appId.value}/?t=${Date.now()}`
   } catch (error) {
@@ -337,20 +332,30 @@ const handleStopGeneration = async () => {
 const showDeployModal = ref(false)
 const deployUrl = ref('')
 
-// 部署应用（临时使用预览 URL）
+// 部署应用
 const handleDeploy = async () => {
+  if (!app.value?.id) {
+    message.error('应用信息不存在')
+    return
+  }
+
   try {
-    // TODO: 后端实现部署 API 后替换
-    // 使用预览 URL 作为临时方案
-    deployUrl.value = `${import.meta.env.VITE_PREVIEW_DOMAIN}/${app.value?.codeGenType || 'HTML'}_${appId.value}/`
-    showDeployModal.value = true
-    message.success('应用已准备就绪')
-  } catch {
-    message.error('操作失败')
+    const res = await deployApp({ appId: app.value.id })
+    if (res.data.code === 0 && res.data.data) {
+      // 部署成功，后端返回完整URL
+      deployUrl.value = res.data.data
+      showDeployModal.value = true
+      // 刷新应用信息以更新 deployKey
+      await fetchAppInfo()
+    } else {
+      message.error('部署失败：' + (res.data.message ?? '未知错误'))
+    }
+  } catch (error) {
+    console.error('部署失败:', error)
+    message.error('部署失败，请稍后重试')
   }
 }
 
-// 复制 URL
 const copyDeployUrl = () => {
   navigator.clipboard.writeText(deployUrl.value)
   message.success('已复制')
@@ -366,6 +371,7 @@ const openPreview = () => {
   showPreview.value = true
   previewUrl.value = `${import.meta.env.VITE_PREVIEW_DOMAIN}/${app.value?.codeGenType || 'HTML'}_${appId.value}/?t=${Date.now()}`
 }
+
 // 应用详情弹窗
 const showAppInfo = ref(false)
 
@@ -388,7 +394,7 @@ const handleVersionCompare = async (version: API.AppVersion) => {
 
   try {
     const res = await diffVersions({
-      appId: appId.value as unknown as number,
+      appId: appId.value as any,
       oldVersion: version.versionNumber - 1,
       newVersion: version.versionNumber,
     })
@@ -417,7 +423,6 @@ const handleVersionView = (version: API.AppVersion) => {
 const handleVersionRollback = (version: API.AppVersion) => {
   console.log('回退到版本:', version)
   // 版本列表组件已经处理了回退逻辑
-  // 这里可以添加额外的处理
 }
 
 // 删除应用
@@ -430,8 +435,7 @@ const handleDeleteApp = () => {
     okButtonProps: { danger: true },
     onOk: async () => {
       try {
-        // 防精度丢失修复
-        const res = await deleteApp({ id: appId.value as unknown as number })
+        const res = await deleteApp({ id: appId.value as any })
         if (res.data.code === 0) {
           message.success('删除成功')
           router.push('/')
@@ -469,7 +473,8 @@ onMounted(() => {
         <a-space>
           <a-button @click="showAppInfo = true">ℹ️ 应用详情</a-button>
           <a-button type="primary" @click="handleDeploy">
-            <template #icon>🚀</template>部署
+            <template #icon>🚀</template>
+            部署
           </a-button>
         </a-space>
       </div>
@@ -542,12 +547,7 @@ onMounted(() => {
               :disabled="!canEdit"
               >↑</a-button
             >
-            <a-button
-              v-else
-              type="primary"
-              shape="circle"
-              danger
-              @click="handleStopGeneration"
+            <a-button v-else type="primary" shape="circle" danger @click="handleStopGeneration"
               >■</a-button
             >
           </div>
@@ -601,7 +601,7 @@ onMounted(() => {
       <div class="version-modal-content">
         <VersionList
           ref="versionListRef"
-          :appId="appId as unknown as number"
+          :appId="appId as any"
           :current-version="app?.currentVersion || 1"
           @compare="handleVersionCompare"
           @view="handleVersionView"
@@ -843,8 +843,6 @@ onMounted(() => {
   border-radius: 8px;
   margin-bottom: 8px;
 }
-
-/* 修复点2：删除了破坏语法的多余CSS代码块 */
 
 /* 部署成功弹窗样式 */
 .deploy-success-content {
