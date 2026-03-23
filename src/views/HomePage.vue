@@ -3,6 +3,7 @@ import { ref, reactive, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { addApp, listMyAppVoByPage, listGoodAppVoByPage } from '@/api/appController'
+import { CodeGenTypeEnum, CODE_GEN_TYPE_CONFIG, DEFAULT_COVER } from '@/constants/codeGenType'
 
 const router = useRouter()
 const route = useRoute()
@@ -10,6 +11,10 @@ const route = useRoute()
 // 提示词输入
 const promptText = ref('')
 const creating = ref(false)
+
+// 代码生成类型（默认智能选择）
+const selectedCodeGenType = ref<CodeGenTypeEnum>(CodeGenTypeEnum.AUTO)
+const codeGenTypeOptions = Object.values(CODE_GEN_TYPE_CONFIG)
 
 // 我的应用
 const myApps = ref<API.AppVO[]>([])
@@ -61,11 +66,15 @@ const handleCreateApp = async () => {
   }
   try {
     creating.value = true
-    const res = await addApp({
+    // 智能路由：AUTO 时不传 codeGenType，让后端自动选择
+    const requestData: API.AppAddRequest = {
       appName: promptText.value.slice(0, 20),
       initPrompt: promptText.value,
-      codeGenType: 'HTML',
-    })
+    }
+    if (selectedCodeGenType.value !== CodeGenTypeEnum.AUTO) {
+      requestData.codeGenType = selectedCodeGenType.value
+    }
+    const res = await addApp(requestData)
     if (res.data.code === 0 && res.data.data) {
       message.success('应用创建成功')
       // 防御雪花 ID 精度丢失
@@ -192,7 +201,12 @@ watch(
           :auto-size="{ minRows: 3, maxRows: 6 }"
           class="prompt-input"
         />
-        <div class="submit-btn-wrapper">
+        <div class="input-footer">
+          <a-select
+            v-model:value="selectedCodeGenType"
+            :options="codeGenTypeOptions"
+            class="gen-type-select"
+          />
           <a-button
             type="primary"
             shape="circle"
@@ -222,7 +236,12 @@ watch(
       <div class="apps-grid">
         <div v-for="app in myApps" :key="app.id" class="app-card">
           <div class="app-cover">
-            <img v-if="app.cover" :src="app.cover" :alt="app.appName" />
+            <img
+              v-if="app.cover"
+              :src="app.cover"
+              :alt="app.appName"
+              @error="(e) => ((e.target as HTMLImageElement).src = DEFAULT_COVER)"
+            />
             <div v-else class="cover-placeholder"><span>📱</span></div>
             <div class="card-actions">
               <a-button type="primary" @click="app.id && goToChat(String(app.id))"
@@ -242,7 +261,12 @@ watch(
       <div class="apps-grid">
         <div v-for="app in goodApps" :key="app.id" class="app-card">
           <div class="app-cover">
-            <img v-if="app.cover" :src="app.cover" :alt="app.appName" />
+            <img
+              v-if="app.cover"
+              :src="app.cover"
+              :alt="app.appName"
+              @error="(e) => ((e.target as HTMLImageElement).src = DEFAULT_COVER)"
+            />
             <div v-else class="cover-placeholder"><span>📱</span></div>
             <div class="card-actions">
               <a-space direction="vertical" style="width: 100%">
@@ -343,6 +367,17 @@ watch(
   border: none !important;
   box-shadow: none !important;
   resize: none;
+}
+
+.input-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.gen-type-select {
+  width: 160px;
 }
 
 .submit-btn-wrapper {

@@ -30,7 +30,7 @@ export async function deleteAppByAdmin(body: API.DeleteRequest, options?: { [key
 export async function getAppVoByIdByAdmin(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
   params: API.getAppVOByIdByAdminParams,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponseAppVO>('/app/admin/get/vo', {
     method: 'GET',
@@ -44,7 +44,7 @@ export async function getAppVoByIdByAdmin(
 /** 此处后端没有提供注释 POST /app/admin/list/page/vo */
 export async function listAppVoByPageByAdmin(
   body: API.AppQueryRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponsePageAppVO>('/app/admin/list/page/vo', {
     method: 'POST',
@@ -59,7 +59,7 @@ export async function listAppVoByPageByAdmin(
 export async function deployApp(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
   params: API.deployAppParams,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponseString>(`/app/deploy`, {
     method: 'POST',
@@ -68,12 +68,11 @@ export async function deployApp(
   })
 }
 
-
 /** 此处后端没有提供注释 GET /app/chat/gen/code */
 export async function chatToGenCode(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
   params: API.chatToGenCodeParams,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.ServerSentEventString[]>('/app/chat/gen/code', {
     method: 'GET',
@@ -88,7 +87,7 @@ export async function chatToGenCode(
 export async function stopGeneration(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
   params: API.stopGenerationParams,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponseBoolean>('/app/chat/stop', {
     method: 'POST',
@@ -115,7 +114,7 @@ export async function deleteApp(body: API.DeleteRequest, options?: { [key: strin
 export async function getAppVoById(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
   params: API.getAppVOByIdParams,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponseAppVO>('/app/get/vo', {
     method: 'GET',
@@ -129,7 +128,7 @@ export async function getAppVoById(
 /** 此处后端没有提供注释 POST /app/good/list/page/vo */
 export async function listGoodAppVoByPage(
   body: API.AppQueryRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponsePageAppVO>('/app/good/list/page/vo', {
     method: 'POST',
@@ -156,7 +155,7 @@ export async function listMyAppByPage(body: API.AppQueryRequest, options?: { [ke
 /** 此处后端没有提供注释 POST /app/my/list/page/vo */
 export async function listMyAppVoByPage(
   body: API.AppQueryRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponsePageAppVO>('/app/my/list/page/vo', {
     method: 'POST',
@@ -176,6 +175,19 @@ export async function updateApp(body: API.AppUpdateRequest, options?: { [key: st
       'Content-Type': 'application/json',
     },
     data: body,
+    ...(options || {}),
+  })
+}
+
+/**
+ * 下载应用代码
+ * GET /app/download/{appId}
+ * @returns ZIP 文件流（Blob）
+ */
+export async function downloadApp(appId: number, options?: { [key: string]: any }) {
+  return request<Blob>(`/app/download/${appId}`, {
+    method: 'GET',
+    responseType: 'blob',
     ...(options || {}),
   })
 }

@@ -27,7 +27,10 @@
           <div class="version-cell">
             <a-checkbox
               :checked="!!selectedVersions[String(record.id)]"
-              @change="(e) => handleVersionSelect(String(record.id), e.target.checked)"
+              @change="
+                (e: { target: { checked: boolean } }) =>
+                  handleVersionSelect(String(record.id), e.target.checked)
+              "
             />
             <a-tag :color="record.versionNumber === currentVersion ? 'blue' : 'default'">
               v{{ record.versionNumber }}
@@ -81,24 +84,22 @@ import { ref, watch, computed } from 'vue'
 import type { ColumnsType, TablePaginationConfig } from 'ant-design-vue/es/table'
 import { message, Modal } from 'ant-design-vue'
 import { listVersionsPage, rollbackToVersion } from '@/api/appVersionController'
-import type { AppVersion } from '@/api/versionTypes'
 
 interface Props {
   // 核心修复：业务主键 appId 必须是 string，防止雪花 ID 精度丢失
   appId: string
-  // 假设 currentVersion 是常规自增版本号(如 1, 2, 3)。如果它也是雪花ID，请一并改为 string
   currentVersion: number
 }
 
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  compare: [version: AppVersion, targetVersion?: AppVersion]
-  view: [version: AppVersion]
-  rollback: [version: AppVersion]
+  compare: [version: API.AppVersionVO, targetVersion?: API.AppVersionVO]
+  view: [version: API.AppVersionVO]
+  rollback: [version: API.AppVersionVO]
 }>()
 
-const versions = ref<AppVersion[]>([])
+const versions = ref<API.AppVersionVO[]>([])
 const loading = ref(false)
 // 统一使用 string 类型的 key 来存储选中状态
 const selectedVersions = ref<Record<string, boolean>>({})
@@ -112,7 +113,7 @@ const pagination = ref<TablePaginationConfig>({
   showSizeChanger: true,
 })
 
-const columns: ColumnsType<AppVersion> = [
+const columns: ColumnsType<API.AppVersionVO> = [
   {
     title: '版本号',
     dataIndex: 'versionNumber',
@@ -159,8 +160,9 @@ const loadVersions = async () => {
 
   loading.value = true
   try {
+    // 修复语法错误，并使用 as any 强行传入 string，防止被 axios/ts 序列化成 number
     const res = await listVersionsPage({
-      appId: props.appId,
+      appId: props.appId as any,
       current: pagination.value.current,
       pageSize: pagination.value.pageSize,
     })
@@ -199,28 +201,28 @@ const handleBatchCompare = () => {
     .filter(([, checked]) => checked)
     // 强制转换为 string 进行比对
     .map(([id]) => versions.value.find((v) => String(v.id) === id))
-    .filter(Boolean) as AppVersion[]
+    .filter(Boolean) as API.AppVersionVO[]
 
   if (selected.length !== 2) {
     message.warning('请选择 2 个版本进行对比')
     return
   }
 
-  emit('compare', selected[0], selected[1])
+  emit('compare', selected[0]!, selected[1]!)
 }
 
 // 单个版本对比
-const handleCompare = (version: AppVersion) => {
+const handleCompare = (version: API.AppVersionVO) => {
   emit('compare', version)
 }
 
 // 查看版本详情
-const handleView = (version: AppVersion) => {
+const handleView = (version: API.AppVersionVO) => {
   emit('view', version)
 }
 
 // 回退版本
-const handleRollback = async (version: AppVersion) => {
+const handleRollback = async (version: API.AppVersionVO) => {
   Modal.confirm({
     title: '确认回退',
     content: `确定要回退到版本 v${version.versionNumber} 吗？`,
@@ -228,9 +230,10 @@ const handleRollback = async (version: AppVersion) => {
     cancelText: '取消',
     onOk: async () => {
       try {
+        // 修复了这里的复制残留语法错误
         const res = await rollbackToVersion({
-          appId: props.appId,
-          targetVersion: version.versionNumber, // 注意这里传的是 versionNumber 还是 id，根据你的后端接口定
+          appId: props.appId as any,
+          targetVersion: version.versionNumber,
         })
 
         if (res.data.code === 0) {

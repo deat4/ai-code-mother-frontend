@@ -9,7 +9,7 @@ let firstFetchLoginUser = true
 /**
  * 全局权限校验
  */
-router.beforeEach(async (to, _from, next) => {
+router.beforeEach(async (to, _from) => {
   const loginUserStore = useLoginUserStore()
   let loginUser = loginUserStore.loginUser
 
@@ -26,18 +26,15 @@ router.beforeEach(async (to, _from, next) => {
   if (needAccess !== ACCESS_ENUM.NOT_LOGIN) {
     // 如果没登录，跳转到登录页面
     if (!loginUser || !loginUser.userRole || loginUser.userRole === ACCESS_ENUM.NOT_LOGIN) {
-      next(`/user/login?redirect=${to.fullPath}`)
-      return
+      return `/user/login?redirect=${to.fullPath}`
     }
     // 如果已经登录了，但是权限不足，那么跳转到无权限页面
     if (!checkAccess(loginUser, needAccess)) {
-      next('/noAuth')
-      return
+      return '/noAuth'
     }
   }
-
-  next()
 })
 
 export { default as ACCESS_ENUM } from './accessEnum'
 export { default as checkAccess } from './checkAccess'
+

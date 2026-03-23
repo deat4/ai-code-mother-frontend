@@ -2,10 +2,18 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
-import { getAppVoById, deleteApp, stopGeneration, deployApp } from '@/api/appController'
-import { listAppChatHistory } from '@/api/chatHistoryController'
-import { diffVersions } from '@/api/appVersionController'
+import {
+  getAppVoById,
+  deleteApp,
+  stopGeneration,
+  deployApp,
+  downloadApp,
+} from '@/api/appController'
+import { listAppChatHistory, saveUserMessage, saveAiMessage } from '@/api/chatHistoryController'
+import { diffVersions, createVersion } from '@/api/appVersionController'
+
 import { useLoginUserStore } from '@/stores/loginUser'
+import { useVisualEditor } from '@/composables/useVisualEditor'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import VersionList from '@/components/VersionList.vue'
 import VersionDiff from '@/components/VersionDiff.vue'
@@ -22,6 +30,9 @@ const app = ref<API.AppVO>()
 
 // 定义消息列表的 DOM 引用，替代原生的 querySelector
 const messageListRef = ref<HTMLElement | null>(null)
+
+// 预览 iframe 引用（用于可视化编辑）
+const previewIframeRef = ref<HTMLIFrameElement | null>(null)
 
 // 补全刚才被意外截断的 ChatMessage 接口定义
 interface ChatMessage {
@@ -60,6 +71,22 @@ const isOwner = computed(() => {
 // 是否可以编辑（非只读模式且是所有者）
 const canEdit = computed(() => !isViewOnly.value && isOwner.value)
 
+// 可视化编辑器
+const {
+  isEditMode,
+  selectedElements,
+  hasSelectedElements,
+  toggleEditMode,
+  removeElement,
+  clearElements,
+  getElementsDescription,
+  handleAfterSend,
+} = useVisualEditor({
+  iframeRef: previewIframeRef,
+  previewUrl,
+  enabled: canEdit,
+})
+
 // 获取应用信息使用的定时器引用
 let initPromptTimeoutId: ReturnType<typeof setTimeout> | null = null
 
@@ -83,9 +110,22 @@ const resetState = () => {
   oldestMessageTime.value = null
   totalHistoryCount.value = 0
   currentSessionId.value = null
+  // 重置可视化编辑器状态
+  clearElements()
 }
 
 // 监听路由参数变化，处理从不同应用间导航
+watch(
+  () => route.params.id,
+  (newId, oldId) => {
+    if (newId && newId !== oldId) {
+      resetState()
+      fetchAppInfo()
+    }
+  },
+)
+
+// 格式化完整时间
 watch(
   () => route.params.id,
   (newId, oldId) => {
@@ -144,7 +184,10 @@ const fetchAppInfo = async () => {
       // 如果有至少 2 条对话记录，展示网站预览
       if (messages.value.length >= 2) {
         showPreview.value = true
-        previewUrl.value = `${import.meta.env.VITE_PREVIEW_DOMAIN}/${app.value?.codeGenType || 'HTML'}_${appId.value}/`
+        // 优先使用后端返回的 previewUrl，否则自行拼接
+        previewUrl.value =
+          app.value?.previewUrl ||
+          `${import.meta.env.VITE_PREVIEW_DOMAIN}/${app.value?.codeGenType || 'HTML'}_${appId.value}/`
       }
     } else {
       message.error('获取应用信息失败')
@@ -210,19 +253,31 @@ const loadChatHistory = async (loadMore = false) => {
 const sendMessage = async () => {
   if (!inputText.value.trim() || sending.value || !canEdit.value) return
 
+  // 构建完整提示词（用户输入 + 选中的元素信息）
+  const elementsDesc = getElementsDescription()
+  const fullPrompt = inputText.value + elementsDesc
+
   const userMsg: ChatMessage = {
     id: Date.now().toString(),
     role: 'user',
-    content: inputText.value,
+    content: inputText.value + (elementsDesc ? '\n[已附加选中元素信息]' : ''),
     createTime: new Date().toLocaleTimeString(),
   }
   messages.value.push(userMsg)
-  const currentInput = inputText.value
+  const currentInput = fullPrompt
   inputText.value = ''
   sending.value = true
   generating.value = true
 
-  // 创建 AI 消息占位
+  // 清理选中元素并退出编辑模式
+  handleAfterSend()
+
+  // 落库用户消息（异步，不阻塞后续流程）
+  saveUserMessage({
+    appId: appId.value as any,
+    message: currentInput,
+  }).catch((err) => console.error('保存用户消息失败:', err))
+
   const aiMessageId = (Date.now() + 1).toString()
   messages.value.push({
     id: aiMessageId,
@@ -293,13 +348,29 @@ const sendMessage = async () => {
         } else if (trimmedLine.startsWith('event:done')) {
           // 生成完成，清除 sessionId
           currentSessionId.value = null
-          // 版本创建由后端自动完成，前端无需调用
-        }
-      }
-    }
 
+          // 落库 AI 消息
+          if (contentBuffer) {
+            saveAiMessage({
+              appId: appId.value as any,
+              message: contentBuffer,
+            }).catch((err) => console.error('保存 AI 消息失败:', err))
+
+            // 创建版本（使用用户输入前20字符作为摘要）
+            const summary = currentInput.slice(0, 20) || 'AI 生成'
+            createVersion({
+              appId: appId.value as any,
+              summary,
+              content: contentBuffer,
+            }).catch((err) => console.error('创建版本失败:', err))
+
+            // 刷新应用信息（更新版本号等）
+            fetchAppInfo().catch((err) => console.error('刷新应用信息失败:', err))
+          }
+        } // end else if (event:done)
+      } // end for
+    } // end while
     showPreview.value = true
-    previewUrl.value = `${import.meta.env.VITE_PREVIEW_DOMAIN}/${app.value?.codeGenType || 'HTML'}_${appId.value}/?t=${Date.now()}`
   } catch (error) {
     console.error('生成失败:', error)
     message.error('生成失败')
@@ -369,7 +440,11 @@ const visitDeployUrl = () => {
 // 打开预览
 const openPreview = () => {
   showPreview.value = true
-  previewUrl.value = `${import.meta.env.VITE_PREVIEW_DOMAIN}/${app.value?.codeGenType || 'HTML'}_${appId.value}/?t=${Date.now()}`
+  // 优先使用后端返回的 previewUrl，否则自行拼接
+  const baseUrl =
+    app.value?.previewUrl ||
+    `${import.meta.env.VITE_PREVIEW_DOMAIN}/${app.value?.codeGenType || 'HTML'}_${appId.value}/`
+  previewUrl.value = `${baseUrl}?t=${Date.now()}`
 }
 
 // 应用详情弹窗
@@ -382,30 +457,55 @@ const versionListRef = ref()
 const compareData = ref<{
   oldVersion: number
   newVersion: number
-  diffResult?: API.VersionDiff
+  diffResult?: API.VersionDiffVO
 }>({
   oldVersion: 0,
   newVersion: 0,
 })
 
-// 处理版本对比
-const handleVersionCompare = async (version: API.AppVersion) => {
-  if (!version.versionNumber || !appId.value) return
+// 监听版本弹窗打开，刷新版本列表数据
+watch(showVersionModal, (isOpen) => {
+  if (isOpen && versionListRef.value) {
+    // 弹窗每次打开，强制刷新版本列表，避免数据陈旧
+    versionListRef.value.loadVersions()
+  }
+})
+
+const handleVersionCompare = async (
+  version: API.AppVersionVO,
+  targetVersion?: API.AppVersionVO,
+) => {
+  if (!appId.value) return
+
+  // 动态决定新旧版本号
+  let oldV = version.versionNumber ? version.versionNumber - 1 : 0
+  let newV = version.versionNumber || 1
+
+  // 如果传了 targetVersion（说明是批量对比功能）
+  if (targetVersion && targetVersion.versionNumber && version.versionNumber) {
+    oldV = Math.min(version.versionNumber, targetVersion.versionNumber)
+    newV = Math.max(version.versionNumber, targetVersion.versionNumber)
+  }
+
+  // 防止因为 V1 版本减一变成 V0 导致后端报错
+  if (oldV <= 0) oldV = 1
 
   try {
     const res = await diffVersions({
       appId: appId.value as any,
-      oldVersion: version.versionNumber - 1,
-      newVersion: version.versionNumber,
+      oldVersion: oldV,
+      newVersion: newV,
     })
 
     if (res.data.code === 0 && res.data.data) {
       compareData.value = {
-        oldVersion: version.versionNumber - 1,
-        newVersion: version.versionNumber,
+        oldVersion: oldV,
+        newVersion: newV,
         diffResult: res.data.data,
       }
       showVersionDiffModal.value = true
+    } else {
+      message.error(res.data.message || '获取版本对比失败')
     }
   } catch (error) {
     console.error('获取版本对比失败:', error)
@@ -414,15 +514,20 @@ const handleVersionCompare = async (version: API.AppVersion) => {
 }
 
 // 处理版本查看
-const handleVersionView = (version: API.AppVersion) => {
+const handleVersionView = (version: API.AppVersionVO) => {
   console.log('查看版本:', version)
   // TODO: 实现版本查看功能
 }
 
 // 处理版本回退
-const handleVersionRollback = (version: API.AppVersion) => {
-  console.log('回退到版本:', version)
-  // 版本列表组件已经处理了回退逻辑
+const handleVersionRollback = async (version: API.AppVersionVO) => {
+  console.log('已回退到版本:', version)
+  // 1. 关闭版本弹窗
+  showVersionModal.value = false
+  showAppInfo.value = false
+  // 2. 重新拉取应用最新信息（更新当前版本号和最新生成的预览）
+  await fetchAppInfo()
+  message.success(`应用已成功刷新至 V${version.versionNumber}`)
 }
 
 // 删除应用
@@ -447,6 +552,31 @@ const handleDeleteApp = () => {
       }
     },
   })
+}
+
+// 下载应用代码
+const downloading = ref(false)
+const handleDownloadApp = async () => {
+  if (!app.value?.id) return
+  try {
+    downloading.value = true
+    const res = await downloadApp(app.value.id as number)
+    // 创建下载链接
+    const url = window.URL.createObjectURL(new Blob([res.data as any]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `${app.value.appName || 'app'}_${app.value.id}.zip`)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+    message.success('下载成功')
+  } catch (error: any) {
+    console.error('下载失败:', error)
+    message.error('下载失败，请稍后重试')
+  } finally {
+    downloading.value = false
+  }
 }
 
 // 编辑应用
@@ -523,11 +653,40 @@ onMounted(() => {
         </div>
 
         <div class="input-section">
+          <!-- 选中元素信息展示 -->
+          <div v-if="hasSelectedElements" class="selected-elements-info">
+            <a-alert type="info" show-icon>
+              <template #message>
+                <div class="selected-elements-header">
+                  <span>已选中 {{ selectedElements.length }} 个元素：</span>
+                  <a-button type="link" size="small" @click="clearElements">清除全部</a-button>
+                </div>
+              </template>
+              <template #description>
+                <div class="selected-elements-list">
+                  <a-tag
+                    v-for="el in selectedElements"
+                    :key="el.id"
+                    closable
+                    @close="removeElement(el.id)"
+                  >
+                    {{ el.tagName }}{{ el.elementId ? '#' + el.elementId : ''
+                    }}{{ el.className ? '.' + el.className.split(/\s+/)[0] : '' }}
+                  </a-tag>
+                </div>
+              </template>
+            </a-alert>
+          </div>
+
           <a-tooltip :title="!canEdit ? '无法在别人的作品下对话哦~' : ''" placement="top">
             <div style="width: 100%">
               <a-textarea
                 v-model:value="inputText"
-                placeholder="请描述你想生成的网站，越详细效果越好哦"
+                :placeholder="
+                  isEditMode
+                    ? '编辑模式：点击预览区域选择要修改的元素'
+                    : '请描述你想生成的网站，越详细效果越好哦'
+                "
                 :auto-size="{ minRows: 3, maxRows: 6 }"
                 :disabled="!canEdit"
                 @press-enter.prevent="sendMessage"
@@ -536,6 +695,15 @@ onMounted(() => {
           </a-tooltip>
           <div class="input-actions">
             <div class="left-actions">
+              <a-button
+                v-if="showPreview"
+                :type="isEditMode ? 'primary' : 'default'"
+                size="small"
+                :disabled="!canEdit"
+                @click="toggleEditMode"
+              >
+                {{ isEditMode ? '📝 退出编辑' : '✏️ 可视化编辑' }}
+              </a-button>
               <a-button size="small" :disabled="!canEdit">📎 上传</a-button>
             </div>
             <a-button
@@ -560,7 +728,12 @@ onMounted(() => {
           <a-button size="small" type="link" @click="showPreview = false">关闭预览</a-button>
         </div>
         <div class="preview-container">
-          <iframe :src="previewUrl" class="preview-frame"></iframe>
+          <iframe
+            ref="previewIframeRef"
+            :src="previewUrl"
+            class="preview-frame"
+            :class="{ 'edit-mode': isEditMode }"
+          ></iframe>
         </div>
       </div>
     </div>
@@ -585,6 +758,7 @@ onMounted(() => {
         </div>
         <div v-if="canEdit" class="action-buttons">
           <a-button type="primary" @click="handleEditApp">✏️ 修改</a-button>
+          <a-button @click="handleDownloadApp" :loading="downloading">📦 下载代码</a-button>
           <a-button @click="showVersionModal = true">📋 版本历史</a-button>
           <a-button danger @click="handleDeleteApp">🗑️ 删除</a-button>
         </div>
@@ -760,6 +934,29 @@ onMounted(() => {
   width: 100%;
   height: 100%;
   border: none;
+}
+
+/* 编辑模式下的预览框架 */
+.preview-frame.edit-mode {
+  cursor: crosshair;
+}
+
+/* 选中元素信息展示样式 */
+.selected-elements-info {
+  margin-bottom: 12px;
+}
+
+.selected-elements-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.selected-elements-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 /* 弹窗所需的样式 */

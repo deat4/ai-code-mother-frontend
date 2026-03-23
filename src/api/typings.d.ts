@@ -96,6 +96,7 @@ declare namespace API {
   type AppVO = {
     id?: number
     appName?: string
+    appDesc?: string
     cover?: string
     initPrompt?: string
     codeGenType?: string
@@ -106,6 +107,9 @@ declare namespace API {
     createTime?: string
     updateTime?: string
     user?: UserVO
+    previewUrl?: string
+    currentVersion?: number
+    totalVersions?: number
   }
 
   type BaseResponseAppVersionDetailVO = {

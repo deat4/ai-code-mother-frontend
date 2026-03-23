@@ -157,11 +157,11 @@ const columns = [
 ]
 
 // 数据和状态
-const data = ref<API.ChatHistoryVO[]>([])
+const data = ref<API.ChatHistory[]>([])
 const total = ref(0)
 const loading = ref(false)
 const showDetailModal = ref(false)
-const currentRecord = ref<API.ChatHistoryVO | null>(null)
+const currentRecord = ref<API.ChatHistory | null>(null)
 
 // 搜索参数
 const searchParams = reactive({
@@ -259,7 +259,7 @@ const doTableChange = (pag: { current?: number; pageSize?: number }) => {
 }
 
 // 查看详情
-const viewDetail = (record: API.ChatHistoryVO) => {
+const viewDetail = (record: API.ChatHistory) => {
   currentRecord.value = record
   showDetailModal.value = true
 }

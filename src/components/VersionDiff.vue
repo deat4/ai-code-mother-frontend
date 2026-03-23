@@ -52,7 +52,7 @@ import { message } from 'ant-design-vue'
 interface Props {
   oldVersionName: string
   newVersionName: string
-  diffResult?: API.VersionDiff
+  diffResult?: API.VersionDiffVO
 }
 
 const props = defineProps<Props>()

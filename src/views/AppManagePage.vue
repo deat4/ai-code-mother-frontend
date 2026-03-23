@@ -3,7 +3,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
-import { listAppVoByPageByAdmin, deleteAppByAdmin, updateAppByAdmin } from '@/api/appController'
+import { listAppVoByPageByAdmin, deleteAppByAdmin, updateApp } from '@/api/appController'
 
 const router = useRouter()
 
@@ -116,7 +116,7 @@ const handleEdit = (id: string | number) => {
 // 设为精选
 const handleSetGood = async (record: API.AppVO) => {
   try {
-    const res = await updateAppByAdmin({
+    const res = await updateApp({
       id: record.id as unknown as number,
       priority: 99,
     })
@@ -149,8 +149,8 @@ onMounted(() => {
           allow-clear
           style="width: 150px"
         >
-          <a-select-option value="html">HTML</a-select-option>
-          <a-select-option value="multi_file">多文件</a-select-option>
+          <a-select-option value="HTML">HTML</a-select-option>
+          <a-select-option value="MULTI_FILE">多文件</a-select-option>
         </a-select>
       </a-form-item>
       <a-form-item label="优先级">
