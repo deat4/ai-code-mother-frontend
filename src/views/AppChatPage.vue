@@ -71,16 +71,16 @@ const isOwner = computed(() => {
 // 是否可以编辑（非只读模式且是所有者）
 const canEdit = computed(() => !isViewOnly.value && isOwner.value)
 
-// 可视化编辑器
+// 可视化编辑器（单选模式）
 const {
   isEditMode,
-  selectedElements,
-  hasSelectedElements,
+  selectedElement,
+  hasSelectedElement,
   toggleEditMode,
-  removeElement,
-  clearElements,
-  getElementsDescription,
+  clearSelectedElement,
+  getElementDescription,
   handleAfterSend,
+  onIframeLoad,
 } = useVisualEditor({
   iframeRef: previewIframeRef,
   previewUrl,
@@ -111,7 +111,7 @@ const resetState = () => {
   totalHistoryCount.value = 0
   currentSessionId.value = null
   // 重置可视化编辑器状态
-  clearElements()
+  clearSelectedElement()
 }
 
 // 监听路由参数变化，处理从不同应用间导航
@@ -254,13 +254,13 @@ const sendMessage = async () => {
   if (!inputText.value.trim() || sending.value || !canEdit.value) return
 
   // 构建完整提示词（用户输入 + 选中的元素信息）
-  const elementsDesc = getElementsDescription()
-  const fullPrompt = inputText.value + elementsDesc
+  const elementDesc = getElementDescription()
+  const fullPrompt = inputText.value + elementDesc
 
   const userMsg: ChatMessage = {
     id: Date.now().toString(),
     role: 'user',
-    content: inputText.value + (elementsDesc ? '\n[已附加选中元素信息]' : ''),
+    content: inputText.value + (elementDesc ? '\n[已附加选中元素信息]' : ''),
     createTime: new Date().toLocaleTimeString(),
   }
   messages.value.push(userMsg)
@@ -653,39 +653,52 @@ onMounted(() => {
         </div>
 
         <div class="input-section">
-          <!-- 选中元素信息展示 -->
-          <div v-if="hasSelectedElements" class="selected-elements-info">
-            <a-alert type="info" show-icon>
-              <template #message>
-                <div class="selected-elements-header">
-                  <span>已选中 {{ selectedElements.length }} 个元素：</span>
-                  <a-button type="link" size="small" @click="clearElements">清除全部</a-button>
+          <!-- 选中元素信息展示（单选模式） -->
+          <a-alert
+            v-if="hasSelectedElement"
+            class="selected-element-alert"
+            type="info"
+            closable
+            @close="clearSelectedElement"
+          >
+            <template #message>
+              <div class="selected-element-info">
+                <div class="element-header">
+                  <span class="element-tag">选中元素：{{ selectedElement?.tagName }}</span>
+                  <span v-if="selectedElement?.elementId" class="element-id">
+                    #{{ selectedElement.elementId }}
+                  </span>
+                  <span v-if="selectedElement?.className" class="element-class">
+                    .{{ selectedElement.className.split(' ').join('.') }}
+                  </span>
                 </div>
-              </template>
-              <template #description>
-                <div class="selected-elements-list">
-                  <a-tag
-                    v-for="el in selectedElements"
-                    :key="el.id"
-                    closable
-                    @close="removeElement(el.id)"
-                  >
-                    {{ el.tagName }}{{ el.elementId ? '#' + el.elementId : ''
-                    }}{{ el.className ? '.' + el.className.split(/\s+/)[0] : '' }}
-                  </a-tag>
+                <div class="element-details">
+                  <div v-if="selectedElement?.textContent" class="element-item">
+                    内容: {{ selectedElement.textContent.substring(0, 50)
+                    }}{{ selectedElement.textContent.length > 50 ? '...' : '' }}
+                  </div>
+                  <div v-if="selectedElement?.pagePath" class="element-item">
+                    页面路径: {{ selectedElement.pagePath }}
+                  </div>
+                  <div class="element-item">
+                    选择器:
+                    <code class="element-selector-code">{{ selectedElement?.selector }}</code>
+                  </div>
                 </div>
-              </template>
-            </a-alert>
-          </div>
+              </div>
+            </template>
+          </a-alert>
 
           <a-tooltip :title="!canEdit ? '无法在别人的作品下对话哦~' : ''" placement="top">
             <div style="width: 100%">
               <a-textarea
                 v-model:value="inputText"
                 :placeholder="
-                  isEditMode
-                    ? '编辑模式：点击预览区域选择要修改的元素'
-                    : '请描述你想生成的网站，越详细效果越好哦'
+                  hasSelectedElement
+                    ? `正在编辑 ${selectedElement?.tagName} 元素，描述您想要的修改...`
+                    : isEditMode
+                      ? '编辑模式：点击预览区域选择要修改的元素'
+                      : '请描述你想生成的网站，越详细效果越好哦'
                 "
                 :auto-size="{ minRows: 3, maxRows: 6 }"
                 :disabled="!canEdit"
@@ -695,15 +708,6 @@ onMounted(() => {
           </a-tooltip>
           <div class="input-actions">
             <div class="left-actions">
-              <a-button
-                v-if="showPreview"
-                :type="isEditMode ? 'primary' : 'default'"
-                size="small"
-                :disabled="!canEdit"
-                @click="toggleEditMode"
-              >
-                {{ isEditMode ? '📝 退出编辑' : '✏️ 可视化编辑' }}
-              </a-button>
               <a-button size="small" :disabled="!canEdit">📎 上传</a-button>
             </div>
             <a-button
@@ -725,7 +729,17 @@ onMounted(() => {
       <div v-if="showPreview" class="preview-section">
         <div class="preview-header">
           <span class="preview-title">预览效果</span>
-          <a-button size="small" type="link" @click="showPreview = false">关闭预览</a-button>
+          <div class="preview-actions">
+            <a-button
+              v-if="canEdit"
+              :type="isEditMode ? 'primary' : 'default'"
+              size="small"
+              @click="toggleEditMode"
+            >
+              {{ isEditMode ? '📝 退出编辑' : '✏️ 可视化编辑' }}
+            </a-button>
+            <a-button size="small" type="link" @click="showPreview = false">关闭预览</a-button>
+          </div>
         </div>
         <div class="preview-container">
           <iframe
@@ -733,6 +747,7 @@ onMounted(() => {
             :src="previewUrl"
             class="preview-frame"
             :class="{ 'edit-mode': isEditMode }"
+            @load="onIframeLoad"
           ></iframe>
         </div>
       </div>
@@ -941,22 +956,67 @@ onMounted(() => {
   cursor: crosshair;
 }
 
-/* 选中元素信息展示样式 */
-.selected-elements-info {
+/* 预览区域头部操作按钮 */
+.preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 选中元素信息展示样式（单选模式） */
+.selected-element-alert {
   margin-bottom: 12px;
 }
 
-.selected-elements-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.selected-element-info {
+  line-height: 1.5;
 }
 
-.selected-elements-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.element-header {
+  margin-bottom: 8px;
+}
+
+.element-tag {
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1890ff;
+}
+
+.element-id {
+  color: #52c41a;
+  margin-left: 4px;
+  font-family: 'Monaco', 'Menlo', monospace;
+}
+
+.element-class {
+  color: #faad14;
+  margin-left: 4px;
+  font-family: 'Monaco', 'Menlo', monospace;
+}
+
+.element-details {
   margin-top: 8px;
+  font-size: 13px;
+}
+
+.element-item {
+  margin-bottom: 4px;
+  color: #666;
+}
+
+.element-item:last-child {
+  margin-bottom: 0;
+}
+
+.element-selector-code {
+  font-family: 'Monaco', 'Menlo', monospace;
+  background: #f6f8fa;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #d73a49;
+  border: 1px solid #e1e4e8;
 }
 
 /* 弹窗所需的样式 */

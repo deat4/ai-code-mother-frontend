@@ -9,14 +9,12 @@ import { VisualEditor, type ElementInfo } from '@/utils/visualEditor'
  * 选中的元素信息（用于 UI 展示）
  */
 export interface SelectedElement {
-  /** 元素唯一标识 */
-  id: string
   /** 元素标签名 */
   tagName: string
-  /** 元素类名 */
-  className: string
   /** 元素 ID */
   elementId: string
+  /** 元素类名 */
+  className: string
   /** 元素文本内容 */
   textContent: string
   /** CSS 选择器 */
@@ -50,31 +48,24 @@ export interface UseVisualEditorOptions {
 export interface UseVisualEditorReturn {
   /** 是否处于编辑模式 */
   isEditMode: Ref<boolean>
-  /** 选中的元素列表 */
-  selectedElements: Ref<SelectedElement[]>
-  /** 是否有待发送的选中元素 */
-  hasSelectedElements: ComputedRef<boolean>
+  /** 选中的元素（单选模式） */
+  selectedElement: Ref<SelectedElement | null>
+  /** 是否有选中的元素 */
+  hasSelectedElement: ComputedRef<boolean>
   /** 进入编辑模式 */
   enterEditMode: () => void
   /** 退出编辑模式 */
   exitEditMode: () => void
   /** 切换编辑模式 */
   toggleEditMode: () => void
-  /** 移除选中的元素 */
-  removeElement: (elementId: string) => void
-  /** 清空所有选中元素 */
-  clearElements: () => void
+  /** 清除选中的元素 */
+  clearSelectedElement: () => void
   /** 获取格式化的元素描述（用于附加到提示词） */
-  getElementsDescription: () => string
+  getElementDescription: () => string
   /** 处理发送消息后的清理 */
   handleAfterSend: () => void
-}
-
-/**
- * 生成元素唯一 ID
- */
-function generateElementId(element: ElementInfo): string {
-  return `${element.tagName}_${element.selector}_${Date.now()}`
+  /** iframe 加载完成回调 */
+  onIframeLoad: () => void
 }
 
 /**
@@ -82,7 +73,6 @@ function generateElementId(element: ElementInfo): string {
  */
 function toSelectedElement(elementInfo: ElementInfo): SelectedElement {
   return {
-    id: generateElementId(elementInfo),
     tagName: elementInfo.tagName,
     className: elementInfo.className,
     elementId: elementInfo.id,
@@ -94,7 +84,7 @@ function toSelectedElement(elementInfo: ElementInfo): SelectedElement {
 }
 
 /**
- * 可视化编辑器 Composable
+ * 可视化编辑器 Composable（单选模式）
  */
 export function useVisualEditor(options: UseVisualEditorOptions): UseVisualEditorReturn {
   const { iframeRef, previewUrl, enabled } = options
@@ -102,11 +92,11 @@ export function useVisualEditor(options: UseVisualEditorOptions): UseVisualEdito
   // 编辑模式状态
   const isEditMode = ref(false)
 
-  // 选中的元素列表
-  const selectedElements = ref<SelectedElement[]>([])
+  // 选中的元素（单选模式）
+  const selectedElement = ref<SelectedElement | null>(null)
 
-  // 是否有待发送的选中元素
-  const hasSelectedElements = computed(() => selectedElements.value.length > 0)
+  // 是否有选中的元素
+  const hasSelectedElement = computed(() => selectedElement.value !== null)
 
   // VisualEditor 实例
   let editor: VisualEditor | null = null
@@ -128,55 +118,41 @@ export function useVisualEditor(options: UseVisualEditorOptions): UseVisualEdito
     editor?.toggleEditMode()
   }
 
-  // 移除选中的元素
-  const removeElement = (elementId: string): void => {
-    const index = selectedElements.value.findIndex((el) => el.id === elementId)
-    if (index > -1) {
-      selectedElements.value.splice(index, 1)
-      editor?.clearSelection()
-    }
-  }
-
-  // 清空所有选中元素
-  const clearElements = (): void => {
-    selectedElements.value = []
+  // 清除选中的元素
+  const clearSelectedElement = (): void => {
+    selectedElement.value = null
+    editor?.clearSelection()
   }
 
   // 获取格式化的元素描述
-  const getElementsDescription = (): string => {
-    if (selectedElements.value.length === 0) return ''
+  const getElementDescription = (): string => {
+    if (!selectedElement.value) return ''
 
-    const descriptions = selectedElements.value.map((el, index) => {
-      const parts = [`元素 ${index + 1}:`]
+    const el = selectedElement.value
+    const parts: string[] = []
 
-      if (el.elementId) {
-        parts.push(`  ID: #${el.elementId}`)
-      }
-      if (el.className) {
-        parts.push(`  类名: .${el.className.split(/\s+/).join('.')}`)
-      }
-      parts.push(`  标签: <${el.tagName}>`)
-      if (el.textContent) {
-        parts.push(`  内容: "${el.textContent}"`)
-      }
-      parts.push(`  选择器: ${el.selector}`)
-      if (el.pagePath) {
-        parts.push(`  页面路径: ${el.pagePath}`)
-      }
-      parts.push(
-        `  位置: top=${el.rect.top}, left=${el.rect.left}, width=${el.rect.width}, height=${el.rect.height}`,
-      )
+    parts.push(`选中元素信息：`)
+    if (el.pagePath) {
+      parts.push(`- 页面路径: ${el.pagePath}`)
+    }
+    parts.push(`- 标签: ${el.tagName}`)
+    parts.push(`- 选择器: ${el.selector}`)
+    if (el.textContent) {
+      parts.push(`- 当前内容: ${el.textContent.substring(0, 100)}`)
+    }
 
-      return parts.join('\n')
-    })
-
-    return `\n\n--- 用户选中的页面元素 ---\n${descriptions.join('\n\n')}\n--- 请根据这些元素信息修改对应的样式或内容 ---\n`
+    return '\n' + parts.join('\n')
   }
 
   // 处理发送消息后的清理
   const handleAfterSend = (): void => {
-    clearElements()
+    clearSelectedElement()
     exitEditMode()
+  }
+
+  // iframe 加载完成回调
+  const onIframeLoad = (): void => {
+    editor?.onIframeLoad()
   }
 
   // 初始化编辑器
@@ -185,15 +161,11 @@ export function useVisualEditor(options: UseVisualEditorOptions): UseVisualEdito
 
     editor = new VisualEditor({
       onElementSelected: (elementInfo: ElementInfo) => {
-        // 检查是否已存在相同选择器的元素
-        const exists = selectedElements.value.some((el) => el.selector === elementInfo.selector)
-        if (!exists) {
-          selectedElements.value.push(toSelectedElement(elementInfo))
-        }
+        // 单选模式：直接替换
+        selectedElement.value = toSelectedElement(elementInfo)
       },
       onElementHover: (elementInfo: ElementInfo) => {
         // 可以在这里处理悬浮提示
-        console.log('[VisualEditor] Hover:', elementInfo.selector)
       },
       onEditModeChange: (mode: boolean) => {
         isEditMode.value = mode
@@ -247,15 +219,15 @@ export function useVisualEditor(options: UseVisualEditorOptions): UseVisualEdito
 
   return {
     isEditMode,
-    selectedElements,
-    hasSelectedElements,
+    selectedElement,
+    hasSelectedElement,
     enterEditMode,
     exitEditMode,
     toggleEditMode,
-    removeElement,
-    clearElements,
-    getElementsDescription,
+    clearSelectedElement,
+    getElementDescription,
     handleAfterSend,
+    onIframeLoad,
   }
 }
 
