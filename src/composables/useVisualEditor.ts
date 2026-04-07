@@ -3,7 +3,7 @@
  * 提供 Vue 组件接口，封装 VisualEditor 类
  */
 import { ref, computed, onMounted, onUnmounted, watch, type Ref, type ComputedRef } from 'vue'
-import { VisualEditor, type ElementInfo } from '@/utils/visualEditor'
+import { VisualEditor, type ElementInfo, type EditResult } from '@/utils/visualEditor'
 
 /**
  * 选中的元素信息（用于 UI 展示）
@@ -31,6 +31,18 @@ export interface SelectedElement {
 }
 
 /**
+ * 编辑结果（用于 UI 展示）
+ */
+export interface EditedElement {
+  /** 元素信息 */
+  elementInfo: SelectedElement
+  /** 原始内容 */
+  originalContent: string
+  /** 编辑后的内容 */
+  editedContent: string
+}
+
+/**
  * 可视化编辑器选项
  */
 export interface UseVisualEditorOptions {
@@ -48,10 +60,16 @@ export interface UseVisualEditorOptions {
 export interface UseVisualEditorReturn {
   /** 是否处于编辑模式 */
   isEditMode: Ref<boolean>
+  /** 是否处于直接编辑模式 */
+  isDirectEdit: Ref<boolean>
   /** 选中的元素（单选模式） */
   selectedElement: Ref<SelectedElement | null>
   /** 是否有选中的元素 */
   hasSelectedElement: ComputedRef<boolean>
+  /** 编辑的元素 */
+  editedElement: Ref<EditedElement | null>
+  /** 是否有编辑结果 */
+  hasEditedElement: ComputedRef<boolean>
   /** 进入编辑模式 */
   enterEditMode: () => void
   /** 退出编辑模式 */
@@ -60,8 +78,12 @@ export interface UseVisualEditorReturn {
   toggleEditMode: () => void
   /** 清除选中的元素 */
   clearSelectedElement: () => void
+  /** 清除编辑结果 */
+  clearEditedElement: () => void
   /** 获取格式化的元素描述（用于附加到提示词） */
   getElementDescription: () => string
+  /** 获取格式化的编辑描述（用于附加到提示词） */
+  getEditDescription: () => string
   /** 处理发送消息后的清理 */
   handleAfterSend: () => void
   /** iframe 加载完成回调 */
@@ -92,11 +114,20 @@ export function useVisualEditor(options: UseVisualEditorOptions): UseVisualEdito
   // 编辑模式状态
   const isEditMode = ref(false)
 
+  // 直接编辑模式状态
+  const isDirectEdit = ref(false)
+
   // 选中的元素（单选模式）
   const selectedElement = ref<SelectedElement | null>(null)
 
   // 是否有选中的元素
   const hasSelectedElement = computed(() => selectedElement.value !== null)
+
+  // 编辑的元素
+  const editedElement = ref<EditedElement | null>(null)
+
+  // 是否有编辑结果
+  const hasEditedElement = computed(() => editedElement.value !== null)
 
   // VisualEditor 实例
   let editor: VisualEditor | null = null
@@ -124,6 +155,11 @@ export function useVisualEditor(options: UseVisualEditorOptions): UseVisualEdito
     editor?.clearSelection()
   }
 
+  // 清除编辑结果
+  const clearEditedElement = (): void => {
+    editedElement.value = null
+  }
+
   // 获取格式化的元素描述
   const getElementDescription = (): string => {
     if (!selectedElement.value) return ''
@@ -144,9 +180,26 @@ export function useVisualEditor(options: UseVisualEditorOptions): UseVisualEdito
     return '\n' + parts.join('\n')
   }
 
+  // 获取格式化的编辑描述
+  const getEditDescription = (): string => {
+    if (!editedElement.value) return ''
+
+    const edit = editedElement.value
+    const parts: string[] = []
+
+    parts.push(`修改元素信息：`)
+    parts.push(`- 标签: ${edit.elementInfo.tagName}`)
+    parts.push(`- 选择器: ${edit.elementInfo.selector}`)
+    parts.push(`- 原内容: "${edit.originalContent}"`)
+    parts.push(`- 新内容: "${edit.editedContent}"`)
+
+    return '\n' + parts.join('\n')
+  }
+
   // 处理发送消息后的清理
   const handleAfterSend = (): void => {
     clearSelectedElement()
+    clearEditedElement()
     exitEditMode()
   }
 
@@ -164,11 +217,28 @@ export function useVisualEditor(options: UseVisualEditorOptions): UseVisualEdito
         // 单选模式：直接替换
         selectedElement.value = toSelectedElement(elementInfo)
       },
-      onElementHover: (elementInfo: ElementInfo) => {
+      onElementHover: (_elementInfo: ElementInfo) => {
         // 可以在这里处理悬浮提示
       },
       onEditModeChange: (mode: boolean) => {
         isEditMode.value = mode
+        if (!mode) {
+          // 退出编辑模式时清理状态
+          selectedElement.value = null
+          editedElement.value = null
+          isDirectEdit.value = false
+        }
+      },
+      onEditComplete: (editResult: EditResult) => {
+        // 保存编辑结果
+        editedElement.value = {
+          elementInfo: toSelectedElement(editResult.elementInfo),
+          originalContent: editResult.originalContent,
+          editedContent: editResult.editedContent,
+        }
+      },
+      onDirectEditModeChange: (mode: boolean) => {
+        isDirectEdit.value = mode
       },
     })
 
@@ -219,13 +289,18 @@ export function useVisualEditor(options: UseVisualEditorOptions): UseVisualEdito
 
   return {
     isEditMode,
+    isDirectEdit,
     selectedElement,
     hasSelectedElement,
+    editedElement,
+    hasEditedElement,
     enterEditMode,
     exitEditMode,
     toggleEditMode,
     clearSelectedElement,
+    clearEditedElement,
     getElementDescription,
+    getEditDescription,
     handleAfterSend,
     onIframeLoad,
   }
@@ -233,4 +308,5 @@ export function useVisualEditor(options: UseVisualEditorOptions): UseVisualEdito
 
 // 导出类型
 export type { SelectedElement as VisualEditorSelectedElement }
-export type { ElementInfo } from '@/utils/visualEditor'
+export type { EditedElement as VisualEditorEditedElement }
+export type { ElementInfo, EditResult } from '@/utils/visualEditor'

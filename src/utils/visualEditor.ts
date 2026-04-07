@@ -26,6 +26,22 @@ export interface ElementInfo {
     width: number
     height: number
   }
+  /** 编辑前的原始内容（可选） */
+  originalContent?: string
+  /** 编辑后的内容（可选） */
+  editedContent?: string
+}
+
+/**
+ * 编辑结果接口
+ */
+export interface EditResult {
+  /** 元素信息 */
+  elementInfo: ElementInfo
+  /** 原始内容 */
+  originalContent: string
+  /** 编辑后的内容 */
+  editedContent: string
 }
 
 /**
@@ -38,6 +54,10 @@ export interface VisualEditorOptions {
   onElementHover?: (elementInfo: ElementInfo) => void
   /** 编辑模式状态变化回调 */
   onEditModeChange?: (isEditMode: boolean) => void
+  /** 直接编辑完成回调 */
+  onEditComplete?: (editResult: EditResult) => void
+  /** 直接编辑模式变化回调 */
+  onDirectEditModeChange?: (isDirectEdit: boolean) => void
 }
 
 /**
@@ -47,6 +67,7 @@ interface IframeMessage {
   type: string
   data?: {
     elementInfo?: ElementInfo
+    editResult?: EditResult
   }
 }
 
@@ -54,7 +75,7 @@ interface IframeMessage {
  * 主窗口发送给 iframe 的消息类型
  */
 interface HostMessage {
-  type: 'TOGGLE_EDIT_MODE' | 'CLEAR_SELECTION' | 'CLEAR_ALL_EFFECTS'
+  type: 'TOGGLE_EDIT_MODE' | 'CLEAR_SELECTION' | 'CLEAR_ALL_EFFECTS' | 'START_DIRECT_EDIT' | 'END_DIRECT_EDIT'
   editMode?: boolean
 }
 
@@ -64,6 +85,7 @@ interface HostMessage {
 export class VisualEditor {
   private iframe: HTMLIFrameElement | null = null
   private isEditMode = false
+  private isDirectEdit = false
   private options: VisualEditorOptions
   private messageHandler: ((event: MessageEvent) => void) | null = null
 
@@ -99,7 +121,9 @@ export class VisualEditor {
    */
   disableEditMode(): void {
     this.isEditMode = false
+    this.isDirectEdit = false
     this.options.onEditModeChange?.(false)
+    this.options.onDirectEditModeChange?.(false)
 
     this.sendMessageToIframe({
       type: 'TOGGLE_EDIT_MODE',
@@ -110,6 +134,39 @@ export class VisualEditor {
     this.sendMessageToIframe({
       type: 'CLEAR_ALL_EFFECTS',
     })
+  }
+
+  /**
+   * 开启直接编辑模式（给选中元素添加 contentEditable）
+   */
+  startDirectEdit(): void {
+    if (!this.iframe || !this.isEditMode) return
+
+    this.isDirectEdit = true
+    this.options.onDirectEditModeChange?.(true)
+
+    this.sendMessageToIframe({
+      type: 'START_DIRECT_EDIT',
+    })
+  }
+
+  /**
+   * 结束直接编辑模式
+   */
+  endDirectEdit(): void {
+    this.isDirectEdit = false
+    this.options.onDirectEditModeChange?.(false)
+
+    this.sendMessageToIframe({
+      type: 'END_DIRECT_EDIT',
+    })
+  }
+
+  /**
+   * 获取直接编辑模式状态
+   */
+  getDirectEditMode(): boolean {
+    return this.isDirectEdit
   }
 
   /**
@@ -218,6 +275,14 @@ export class VisualEditor {
           this.options.onElementHover(data.elementInfo)
         }
         break
+      case 'EDIT_COMPLETE':
+        if (this.options.onEditComplete && data?.editResult) {
+          this.options.onEditComplete(data.editResult)
+          // 结束直接编辑模式
+          this.isDirectEdit = false
+          this.options.onDirectEditModeChange?.(false)
+        }
+        break
     }
   }
 
@@ -277,15 +342,17 @@ export class VisualEditor {
   window.__visualEditorInjected = true;
 
   let isEditMode = true;
+  let isDirectEdit = false;
   let currentHoverElement = null;
   let currentSelectedElement = null;
+  let originalContent = '';
 
   /**
    * 注入编辑模式样式
    */
   function injectStyles() {
     if (document.getElementById('edit-mode-styles')) return;
-    
+
     const style = document.createElement('style');
     style.id = 'edit-mode-styles';
     style.textContent = \`
@@ -324,6 +391,23 @@ export class VisualEditor {
         pointer-events: none !important;
         z-index: -1 !important;
       }
+      .direct-editing {
+        outline: 3px solid #faad14 !important;
+        outline-offset: 2px !important;
+        background: rgba(250, 173, 20, 0.1) !important;
+      }
+      .direct-edit-hint {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: linear-gradient(135deg, #faad14 0%, #d48806 100%);
+        color: white;
+        padding: 10px 16px;
+        border-radius: 8px;
+        font-size: 13px;
+        z-index: 99999;
+        box-shadow: 0 4px 12px rgba(250, 173, 20, 0.3);
+      }
     \`;
     document.head.appendChild(style);
   }
@@ -334,30 +418,30 @@ export class VisualEditor {
   function generateSelector(element) {
     const path = [];
     let current = element;
-    
+
     while (current && current !== document.body) {
       let selector = current.tagName.toLowerCase();
-      
+
       if (current.id) {
         selector += '#' + CSS.escape(current.id);
         path.unshift(selector);
         break;
       }
-      
+
       if (current.className && typeof current.className === 'string') {
         const classes = current.className.split(' ').filter(c => c && !c.startsWith('edit-'));
         if (classes.length > 0) {
           selector += '.' + classes.map(c => CSS.escape(c)).join('.');
         }
       }
-      
+
       const siblings = Array.from(current.parentElement?.children || []);
       const index = siblings.indexOf(current) + 1;
       selector += ':nth-child(' + index + ')';
       path.unshift(selector);
       current = current.parentElement;
     }
-    
+
     return path.join(' > ');
   }
 
@@ -412,10 +496,10 @@ export class VisualEditor {
    */
   function showEditTip() {
     if (document.getElementById('edit-tip')) return;
-    
+
     const tip = document.createElement('div');
     tip.id = 'edit-tip';
-    tip.innerHTML = '🎯 编辑模式已开启<br/>悬浮查看元素，点击选中元素';
+    tip.innerHTML = '🎯 编辑模式已开启<br/>点击选中元素，双击直接编辑';
     tip.style.cssText = \`
       position: fixed;
       top: 20px;
@@ -429,7 +513,7 @@ export class VisualEditor {
       box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
       animation: editTipFadeIn 0.3s ease;
     \`;
-    
+
     const style = document.createElement('style');
     style.textContent = \`
       @keyframes editTipFadeIn {
@@ -439,7 +523,7 @@ export class VisualEditor {
     \`;
     document.head.appendChild(style);
     document.body.appendChild(tip);
-    
+
     // 3秒后自动消失
     setTimeout(() => {
       if (tip.parentNode) {
@@ -457,6 +541,63 @@ export class VisualEditor {
     if (tip) tip.remove();
   }
 
+  /**
+   * 开启直接编辑模式
+   */
+  function startDirectEdit() {
+    if (!currentSelectedElement) return;
+
+    isDirectEdit = true;
+    originalContent = currentSelectedElement.textContent || '';
+
+    // 添加编辑样式
+    currentSelectedElement.classList.add('direct-editing');
+    currentSelectedElement.contentEditable = 'true';
+    currentSelectedElement.focus();
+
+    // 显示提示
+    const hint = document.createElement('div');
+    hint.id = 'direct-edit-hint';
+    hint.className = 'direct-edit-hint';
+    hint.textContent = '编辑中... 点击其他地方完成编辑';
+    document.body.appendChild(hint);
+  }
+
+  /**
+   * 结束直接编辑模式
+   */
+  function endDirectEdit() {
+    if (!currentSelectedElement || !isDirectEdit) return;
+
+    const editedContent = currentSelectedElement.textContent || '';
+    const elementInfo = getElementInfo(currentSelectedElement);
+
+    // 移除编辑状态
+    currentSelectedElement.contentEditable = 'false';
+    currentSelectedElement.classList.remove('direct-editing');
+    isDirectEdit = false;
+
+    // 移除提示
+    const hint = document.getElementById('direct-edit-hint');
+    if (hint) hint.remove();
+
+    // 如果内容有变化，发送编辑结果
+    if (editedContent !== originalContent) {
+      try {
+        window.parent.postMessage({
+          type: 'EDIT_COMPLETE',
+          data: {
+            editResult: {
+              elementInfo: elementInfo,
+              originalContent: originalContent,
+              editedContent: editedContent
+            }
+          }
+        }, '*');
+      } catch { /* 静默处理 */ }
+    }
+  }
+
   let eventListenersAdded = false;
 
   /**
@@ -466,7 +607,7 @@ export class VisualEditor {
     if (eventListenersAdded) return;
 
     const mouseoverHandler = (event) => {
-      if (!isEditMode) return;
+      if (!isEditMode || isDirectEdit) return;
 
       const target = event.target;
       if (target === currentHoverElement || target === currentSelectedElement) return;
@@ -488,7 +629,7 @@ export class VisualEditor {
     };
 
     const mouseoutHandler = (event) => {
-      if (!isEditMode) return;
+      if (!isEditMode || isDirectEdit) return;
 
       const target = event.target;
       if (!event.relatedTarget || !target.contains(event.relatedTarget)) {
@@ -497,7 +638,7 @@ export class VisualEditor {
     };
 
     const clickHandler = (event) => {
-      if (!isEditMode) return;
+      if (!isEditMode || isDirectEdit) return;
 
       event.preventDefault();
       event.stopPropagation();
@@ -533,9 +674,39 @@ export class VisualEditor {
       } catch { /* 静默处理 */ }
     };
 
+    const dblclickHandler = (event) => {
+      if (!isEditMode) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const target = event.target;
+      if (target === document.body || target === document.documentElement) return;
+      if (target.tagName === 'SCRIPT' || target.tagName === 'STYLE') return;
+
+      // 如果没有选中，先选中
+      if (!currentSelectedElement || currentSelectedElement !== target) {
+        clearSelectedEffect();
+        clearHoverEffect();
+        target.classList.add('edit-selected');
+        currentSelectedElement = target;
+      }
+
+      // 开启直接编辑
+      startDirectEdit();
+    };
+
+    const blurHandler = (event) => {
+      if (isDirectEdit && currentSelectedElement === event.target) {
+        endDirectEdit();
+      }
+    };
+
     document.body.addEventListener('mouseover', mouseoverHandler, true);
     document.body.addEventListener('mouseout', mouseoutHandler, true);
     document.body.addEventListener('click', clickHandler, true);
+    document.body.addEventListener('dblclick', dblclickHandler, true);
+    document.body.addEventListener('blur', blurHandler, true);
     eventListenersAdded = true;
   }
 
@@ -544,7 +715,7 @@ export class VisualEditor {
    */
   window.addEventListener('message', (event) => {
     const { type, editMode } = event.data;
-    
+
     switch (type) {
       case 'TOGGLE_EDIT_MODE':
         isEditMode = editMode;
@@ -556,6 +727,14 @@ export class VisualEditor {
           clearHoverEffect();
           clearSelectedEffect();
           hideEditTip();
+          // 结束直接编辑
+          if (isDirectEdit && currentSelectedElement) {
+            currentSelectedElement.contentEditable = 'false';
+            currentSelectedElement.classList.remove('direct-editing');
+            isDirectEdit = false;
+            const hint = document.getElementById('direct-edit-hint');
+            if (hint) hint.remove();
+          }
         }
         break;
       case 'CLEAR_SELECTION':
@@ -566,6 +745,19 @@ export class VisualEditor {
         clearHoverEffect();
         clearSelectedEffect();
         hideEditTip();
+        if (isDirectEdit && currentSelectedElement) {
+          currentSelectedElement.contentEditable = 'false';
+          currentSelectedElement.classList.remove('direct-editing');
+          isDirectEdit = false;
+          const hint = document.getElementById('direct-edit-hint');
+          if (hint) hint.remove();
+        }
+        break;
+      case 'START_DIRECT_EDIT':
+        startDirectEdit();
+        break;
+      case 'END_DIRECT_EDIT':
+        endDirectEdit();
         break;
     }
   });

@@ -17,6 +17,7 @@ import { useVisualEditor } from '@/composables/useVisualEditor'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import VersionList from '@/components/VersionList.vue'
 import VersionDiff from '@/components/VersionDiff.vue'
+import hljs from 'highlight.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,10 +44,21 @@ interface ChatMessage {
   createTime: string
 }
 
+// 代码文件接口（用于 Tab 展示）
+interface CodeFile {
+  fileName: string
+  language: string
+  content: string
+}
+
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
 const sending = ref(false)
 const generating = ref(false)
+
+// 代码文件列表（Tab 展示）
+const codeFiles = ref<CodeFile[]>([])
+const activeCodeTab = ref<string>('')
 
 // 对话历史分页相关
 const hasMoreHistory = ref(true)
@@ -62,6 +74,9 @@ const currentSessionId = ref<string | null>(null) // 当前生成会话 ID
 const showPreview = ref(false)
 const previewUrl = ref('')
 
+// 直接编辑应用状态
+const applyingEdit = ref(false)
+
 // 是否是应用的所有者（保留 String 强转，应对后端的 Number 精度问题）
 const isOwner = computed(() => {
   if (!app.value || !loginUserStore.loginUser.id) return false
@@ -74,11 +89,17 @@ const canEdit = computed(() => !isViewOnly.value && isOwner.value)
 // 可视化编辑器（单选模式）
 const {
   isEditMode,
+  isDirectEdit,
   selectedElement,
   hasSelectedElement,
+  editedElement,
+  hasEditedElement,
+  exitEditMode,
   toggleEditMode,
   clearSelectedElement,
+  clearEditedElement,
   getElementDescription,
+  getEditDescription,
   handleAfterSend,
   onIframeLoad,
 } = useVisualEditor({
@@ -112,6 +133,10 @@ const resetState = () => {
   currentSessionId.value = null
   // 重置可视化编辑器状态
   clearSelectedElement()
+  clearEditedElement()
+  // 重置代码文件状态
+  codeFiles.value = []
+  activeCodeTab.value = ''
 }
 
 // 监听路由参数变化，处理从不同应用间导航
@@ -151,6 +176,166 @@ const formatDateTime = (time?: string) => {
     })
   } catch {
     return time
+  }
+}
+
+// 代码高亮
+const highlightedCode = (file: CodeFile) => {
+  const language = hljs.getLanguage(file.language) ? file.language : 'plaintext'
+  return hljs.highlight(file.content, { language }).value
+}
+
+// 复制代码
+const copyCode = async (content: string) => {
+  try {
+    await navigator.clipboard.writeText(content)
+    message.success('已复制')
+  } catch {
+    message.error('复制失败')
+  }
+}
+
+// 直接应用编辑修改（不追加描述，直接发送给 AI）
+const applyEditDirectly = async () => {
+  if (!editedElement.value) return
+
+  applyingEdit.value = true
+  try {
+    // 构建提示词
+    const editDesc = getEditDescription()
+    const fullPrompt = `请根据以下修改更新代码：${editDesc}`
+
+    // 添加用户消息
+    const userMsg: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: `直接应用修改：${editedElement.value.elementInfo.tagName} 元素`,
+      createTime: new Date().toLocaleTimeString(),
+    }
+    messages.value.push(userMsg)
+
+    // 清理编辑状态
+    clearEditedElement()
+    exitEditMode()
+
+    sending.value = true
+    generating.value = true
+
+    // 保存用户消息
+    saveUserMessage({
+      appId: appId.value as any,
+      message: fullPrompt,
+    }).catch((err) => console.error('保存用户消息失败:', err))
+
+    const aiMessageId = (Date.now() + 1).toString()
+    messages.value.push({
+      id: aiMessageId,
+      role: 'assistant',
+      content: '',
+      createTime: new Date().toLocaleTimeString(),
+    })
+
+    // 发送给 AI
+    const url = `${import.meta.env.VITE_API_BASE_URL}/app/chat/gen/code?appId=${encodeURIComponent(appId.value)}&message=${encodeURIComponent(fullPrompt)}`
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    })
+
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('No reader available')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let contentBuffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        const trimmedLine = line.trim()
+        if (trimmedLine.startsWith('event:session')) continue
+        if (trimmedLine.startsWith('event:tool_call')) continue
+
+        if (trimmedLine.startsWith('data:')) {
+          const data = trimmedLine.slice(5).trim()
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.sessionId) {
+              currentSessionId.value = parsed.sessionId
+              continue
+            }
+            if (parsed.type === 'tool_call') {
+              codeFiles.value.push({
+                fileName: parsed.fileName,
+                language: parsed.language,
+                content: parsed.content,
+              })
+              if (!activeCodeTab.value) {
+                activeCodeTab.value = parsed.fileName
+              }
+              continue
+            }
+            if (parsed.d) {
+              contentBuffer += parsed.d
+              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
+              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
+              if (targetMsg) {
+                targetMsg.content = contentBuffer
+              }
+              requestAnimationFrame(() => {
+                if (messageListRef.value) {
+                  messageListRef.value.scrollTop = messageListRef.value.scrollHeight
+                }
+              })
+            }
+          } catch {
+            /* 忽略 */
+          }
+        } else if (trimmedLine.startsWith('event:done')) {
+          currentSessionId.value = null
+          if (contentBuffer) {
+            saveAiMessage({
+              appId: appId.value as any,
+              message: contentBuffer,
+            }).catch((err) => console.error('保存 AI 消息失败:', err))
+
+            createVersion({
+              appId: appId.value as any,
+              summary: '直接应用编辑修改',
+              content: contentBuffer,
+            }).catch((err) => console.error('创建版本失败:', err))
+
+            fetchAppInfo().catch((err) => console.error('刷新应用信息失败:', err))
+          }
+        }
+      }
+    }
+    showPreview.value = true
+  } catch (error) {
+    console.error('应用修改失败:', error)
+    message.error('应用修改失败')
+  } finally {
+    sending.value = false
+    generating.value = false
+    currentSessionId.value = null
+    applyingEdit.value = false
+  }
+}
+
+// 聚焦输入框以追加描述
+const focusInputForEdit = () => {
+  // 聚焦输入框
+  const textarea = document.querySelector('.input-section textarea') as HTMLTextAreaElement
+  if (textarea) {
+    textarea.focus()
   }
 }
 
@@ -253,14 +438,18 @@ const loadChatHistory = async (loadMore = false) => {
 const sendMessage = async () => {
   if (!inputText.value.trim() || sending.value || !canEdit.value) return
 
-  // 构建完整提示词（用户输入 + 选中的元素信息）
+  // 构建完整提示词（用户输入 + 选中的元素信息 + 编辑信息）
   const elementDesc = getElementDescription()
-  const fullPrompt = inputText.value + elementDesc
+  const editDesc = getEditDescription()
+  const fullPrompt = inputText.value + elementDesc + editDesc
 
   const userMsg: ChatMessage = {
     id: Date.now().toString(),
     role: 'user',
-    content: inputText.value + (elementDesc ? '\n[已附加选中元素信息]' : ''),
+    content:
+      inputText.value +
+      (elementDesc ? '\n[已附加选中元素信息]' : '') +
+      (editDesc ? '\n[已附加修改内容]' : ''),
     createTime: new Date().toLocaleTimeString(),
   }
   messages.value.push(userMsg)
@@ -319,6 +508,11 @@ const sendMessage = async () => {
           continue
         }
 
+        // 处理 tool_call 事件 - 下一个 data 行包含文件信息
+        if (trimmedLine.startsWith('event:tool_call')) {
+          continue
+        }
+
         if (trimmedLine.startsWith('data:')) {
           const data = trimmedLine.slice(5).trim()
           try {
@@ -326,6 +520,19 @@ const sendMessage = async () => {
             // 保存 sessionId
             if (parsed.sessionId) {
               currentSessionId.value = parsed.sessionId
+              continue
+            }
+            // 处理 tool_call 数据
+            if (parsed.type === 'tool_call') {
+              codeFiles.value.push({
+                fileName: parsed.fileName,
+                language: parsed.language,
+                content: parsed.content,
+              })
+              // 默认激活第一个文件
+              if (!activeCodeTab.value) {
+                activeCodeTab.value = parsed.fileName
+              }
               continue
             }
             // 处理内容流
@@ -689,16 +896,50 @@ onMounted(() => {
             </template>
           </a-alert>
 
+          <!-- 编辑结果信息展示 -->
+          <div v-if="hasEditedElement" class="edited-element-card">
+            <div class="edit-card-header">
+              <span class="edit-card-title">✏️ 已修改: {{ editedElement?.elementInfo?.tagName }}</span>
+              <a-button type="text" size="small" @click="clearEditedElement">✕</a-button>
+            </div>
+            <div class="edit-card-body">
+              <div class="edit-item">
+                <span class="edit-label">原内容:</span>
+                <span class="edit-old">{{ editedElement?.originalContent?.substring(0, 50)
+                }}{{ (editedElement?.originalContent?.length || 0) > 50 ? '...' : '' }}</span>
+              </div>
+              <div class="edit-item">
+                <span class="edit-label">新内容:</span>
+                <span class="edit-new">{{ editedElement?.editedContent?.substring(0, 50)
+                }}{{ (editedElement?.editedContent?.length || 0) > 50 ? '...' : '' }}</span>
+              </div>
+              <div class="edit-item">
+                <span class="edit-label">选择器:</span>
+                <code class="edit-selector-code">{{ editedElement?.elementInfo?.selector }}</code>
+              </div>
+            </div>
+            <div class="edit-card-actions">
+              <a-button type="primary" size="small" :loading="applyingEdit" @click="applyEditDirectly">
+                直接应用修改
+              </a-button>
+              <a-button size="small" @click="focusInputForEdit">
+                追加描述发送
+              </a-button>
+            </div>
+          </div>
+
           <a-tooltip :title="!canEdit ? '无法在别人的作品下对话哦~' : ''" placement="top">
             <div style="width: 100%">
               <a-textarea
                 v-model:value="inputText"
                 :placeholder="
-                  hasSelectedElement
-                    ? `正在编辑 ${selectedElement?.tagName} 元素，描述您想要的修改...`
-                    : isEditMode
-                      ? '编辑模式：点击预览区域选择要修改的元素'
-                      : '请描述你想生成的网站，越详细效果越好哦'
+                  hasEditedElement
+                    ? `已修改 ${editedElement?.elementInfo?.tagName} 元素，描述您想要的进一步修改...`
+                    : hasSelectedElement
+                      ? `正在编辑 ${selectedElement?.tagName} 元素，描述您想要的修改...`
+                      : isEditMode
+                        ? '编辑模式：点击选中元素，双击直接编辑内容'
+                        : '请描述你想生成的网站，越详细效果越好哦'
                 "
                 :auto-size="{ minRows: 3, maxRows: 6 }"
                 :disabled="!canEdit"
@@ -709,6 +950,14 @@ onMounted(() => {
           <div class="input-actions">
             <div class="left-actions">
               <a-button size="small" :disabled="!canEdit">📎 上传</a-button>
+              <a-button
+                v-if="showPreview && canEdit"
+                size="small"
+                :type="isEditMode ? 'primary' : 'default'"
+                @click="toggleEditMode"
+              >
+                {{ isEditMode ? '📝 退出编辑' : '✏️ 可视化编辑' }}
+              </a-button>
             </div>
             <a-button
               v-if="!generating"
@@ -727,17 +976,23 @@ onMounted(() => {
       </div>
 
       <div v-if="showPreview" class="preview-section">
+        <!-- 代码文件 Tab 栏 -->
+        <div v-if="codeFiles.length > 0" class="code-tabs-section">
+          <a-tabs v-model:activeKey="activeCodeTab" size="small">
+            <a-tab-pane v-for="file in codeFiles" :key="file.fileName" :tab="file.fileName">
+              <div class="code-content">
+                <div class="code-header">
+                  <span class="file-lang">{{ file.language }}</span>
+                  <a-button size="small" @click="copyCode(file.content)">复制</a-button>
+                </div>
+                <pre><code v-html="highlightedCode(file)"></code></pre>
+              </div>
+            </a-tab-pane>
+          </a-tabs>
+        </div>
         <div class="preview-header">
           <span class="preview-title">预览效果</span>
           <div class="preview-actions">
-            <a-button
-              v-if="canEdit"
-              :type="isEditMode ? 'primary' : 'default'"
-              size="small"
-              @click="toggleEditMode"
-            >
-              {{ isEditMode ? '📝 退出编辑' : '✏️ 可视化编辑' }}
-            </a-button>
             <a-button size="small" type="link" @click="showPreview = false">关闭预览</a-button>
           </div>
         </div>
@@ -845,6 +1100,9 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* Import highlight.js theme for code tabs */
+@import 'highlight.js/styles/github-dark.css';
+
 .app-chat-page {
   display: flex;
   flex-direction: column;
@@ -925,6 +1183,57 @@ onMounted(() => {
   flex-direction: column;
   overflow: hidden;
   flex-shrink: 0;
+}
+
+/* 代码文件 Tab 栏 */
+.code-tabs-section {
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+  max-height: 300px;
+}
+
+.code-tabs-section :deep(.ant-tabs-nav) {
+  margin-bottom: 0;
+  padding: 0 8px;
+}
+
+.code-tabs-section :deep(.ant-tabs-content) {
+  height: 200px;
+}
+
+.code-content {
+  height: 200px;
+  overflow: auto;
+  background: #161b22;
+}
+
+.code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 12px;
+  background: #21262d;
+  border-bottom: 1px solid #30363d;
+}
+
+.file-lang {
+  font-size: 12px;
+  color: #8b949e;
+  font-family: 'Monaco', 'Menlo', monospace;
+}
+
+.code-content pre {
+  margin: 0;
+  padding: 12px;
+  font-family: 'Fira Code', 'Monaco', 'Menlo', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.code-content code {
+  background: transparent;
 }
 
 /* 预览区头部样式 */
@@ -1010,6 +1319,77 @@ onMounted(() => {
 }
 
 .element-selector-code {
+  font-family: 'Monaco', 'Menlo', monospace;
+  background: #f6f8fa;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #d73a49;
+  border: 1px solid #e1e4e8;
+}
+
+/* 编辑结果信息展示样式 */
+.edited-element-card {
+  margin-bottom: 12px;
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.edit-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #d9f7be;
+  border-bottom: 1px solid #b7eb8f;
+}
+
+.edit-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #52c41a;
+}
+
+.edit-card-body {
+  padding: 12px;
+}
+
+.edit-card-body .edit-item {
+  margin-bottom: 6px;
+  color: #666;
+  font-size: 13px;
+}
+
+.edit-card-body .edit-item:last-child {
+  margin-bottom: 0;
+}
+
+.edit-card-actions {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-top: 1px solid #e8e8e8;
+}
+
+.edit-label {
+  color: #999;
+  margin-right: 8px;
+}
+
+.edit-old {
+  color: #cf1322;
+  text-decoration: line-through;
+}
+
+.edit-new {
+  color: #52c41a;
+  font-weight: 500;
+}
+
+.edit-selector-code {
   font-family: 'Monaco', 'Menlo', monospace;
   background: #f6f8fa;
   padding: 2px 6px;
