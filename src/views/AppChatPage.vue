@@ -263,6 +263,7 @@ const applyEditDirectly = async () => {
         const trimmedLine = line.trim()
         if (trimmedLine.startsWith('event:session')) continue
         if (trimmedLine.startsWith('event:tool_call')) continue
+        if (trimmedLine.startsWith('event:business-error')) continue
 
         if (trimmedLine.startsWith('data:')) {
           const data = trimmedLine.slice(5).trim()
@@ -271,6 +272,28 @@ const applyEditDirectly = async () => {
             if (parsed.sessionId) {
               currentSessionId.value = parsed.sessionId
               continue
+            }
+            // 处理 business-error 数据
+            if (parsed.error) {
+              console.error('收到业务错误:', parsed)
+              if (parsed.code === 42988) {
+                message.warning('请求过于频繁，请等待60秒后再试')
+              } else if (parsed.code === 40100) {
+                message.warning('请先登录')
+                router.push('/user/login')
+              } else if (parsed.code === 40101) {
+                message.error('无权限访问该应用')
+              } else if (parsed.code === 40400) {
+                message.error('应用不存在')
+              } else {
+                message.error(parsed.message || '请求处理失败')
+              }
+              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
+              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
+              if (targetMsg) {
+                targetMsg.content = `❌ ${parsed.message || '请求处理失败'}`
+              }
+              break
             }
             if (parsed.type === 'tool_call') {
               codeFiles.value.push({
@@ -504,12 +527,16 @@ const sendMessage = async () => {
 
         // 处理 session 事件 - 保存 sessionId
         if (trimmedLine.startsWith('event:session')) {
-          // 下一个 data 行包含 sessionId
           continue
         }
 
         // 处理 tool_call 事件 - 下一个 data 行包含文件信息
         if (trimmedLine.startsWith('event:tool_call')) {
+          continue
+        }
+
+        // 处理 business-error 事件 - 业务错误（如限流）
+        if (trimmedLine.startsWith('event:business-error')) {
           continue
         }
 
@@ -521,6 +548,36 @@ const sendMessage = async () => {
             if (parsed.sessionId) {
               currentSessionId.value = parsed.sessionId
               continue
+            }
+            // 处理 business-error 数据
+            if (parsed.error) {
+              console.error('收到业务错误:', parsed)
+              // 根据错误码显示不同提示
+              if (parsed.code === 42988) {
+                // 限流错误
+                message.warning('请求过于频繁，请等待60秒后再试')
+              } else if (parsed.code === 40100) {
+                // 未登录
+                message.warning('请先登录')
+                router.push('/user/login')
+              } else if (parsed.code === 40101) {
+                // 无权限
+                message.error('无权限访问该应用')
+              } else if (parsed.code === 40400) {
+                // 数据不存在
+                message.error('应用不存在')
+              } else {
+                // 其他业务错误
+                message.error(parsed.message || '请求处理失败')
+              }
+              // 更新 AI 消息为错误提示
+              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
+              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
+              if (targetMsg) {
+                targetMsg.content = `❌ ${parsed.message || '请求处理失败'}`
+              }
+              // 直接跳出循环，结束处理
+              break
             }
             // 处理 tool_call 数据
             if (parsed.type === 'tool_call') {
