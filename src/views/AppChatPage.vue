@@ -264,6 +264,8 @@ const applyEditDirectly = async () => {
         if (trimmedLine.startsWith('event:session')) continue
         if (trimmedLine.startsWith('event:tool_call')) continue
         if (trimmedLine.startsWith('event:business-error')) continue
+        if (trimmedLine.startsWith('event:guardrail-error')) continue
+        if (trimmedLine.startsWith('event:system-error')) continue
 
         if (trimmedLine.startsWith('data:')) {
           const data = trimmedLine.slice(5).trim()
@@ -274,7 +276,7 @@ const applyEditDirectly = async () => {
               continue
             }
             // 处理 business-error 数据
-            if (parsed.error) {
+            if (parsed.error && parsed.code !== undefined) {
               console.error('收到业务错误:', parsed)
               if (parsed.code === 42988) {
                 message.warning('请求过于频繁，请等待60秒后再试')
@@ -292,6 +294,31 @@ const applyEditDirectly = async () => {
               const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
               if (targetMsg) {
                 targetMsg.content = `❌ ${parsed.message || '请求处理失败'}`
+              }
+              break
+            }
+            // 处理 guardrail-error 数据（护轨错误 - 内容安全）
+            if (parsed.guardrailError) {
+              console.error('收到护轨错误:', parsed)
+              message.warning({
+                content: parsed.message || '内容安全提示：您的请求包含敏感内容',
+                duration: 5,
+              })
+              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
+              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
+              if (targetMsg) {
+                targetMsg.content = `⚠️ 内容安全提示：${parsed.message || '您的请求包含敏感内容'}`
+              }
+              break
+            }
+            // 处理 system-error 数据
+            if (parsed.systemError) {
+              console.error('收到系统错误:', parsed)
+              message.error('系统错误，请稍后重试')
+              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
+              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
+              if (targetMsg) {
+                targetMsg.content = `❌ 系统错误，请稍后重试`
               }
               break
             }
@@ -540,6 +567,16 @@ const sendMessage = async () => {
           continue
         }
 
+        // 处理 guardrail-error 事件 - 护轨错误（内容安全）
+        if (trimmedLine.startsWith('event:guardrail-error')) {
+          continue
+        }
+
+        // 处理 system-error 事件 - 系统错误
+        if (trimmedLine.startsWith('event:system-error')) {
+          continue
+        }
+
         if (trimmedLine.startsWith('data:')) {
           const data = trimmedLine.slice(5).trim()
           try {
@@ -550,7 +587,7 @@ const sendMessage = async () => {
               continue
             }
             // 处理 business-error 数据
-            if (parsed.error) {
+            if (parsed.error && parsed.code !== undefined) {
               console.error('收到业务错误:', parsed)
               // 根据错误码显示不同提示
               if (parsed.code === 42988) {
@@ -576,7 +613,31 @@ const sendMessage = async () => {
               if (targetMsg) {
                 targetMsg.content = `❌ ${parsed.message || '请求处理失败'}`
               }
-              // 直接跳出循环，结束处理
+              break
+            }
+            // 处理 guardrail-error 数据（护轨错误 - 内容安全）
+            if (parsed.guardrailError) {
+              console.error('收到护轨错误:', parsed)
+              message.warning({
+                content: parsed.message || '内容安全提示：您的请求包含敏感内容',
+                duration: 5,
+              })
+              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
+              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
+              if (targetMsg) {
+                targetMsg.content = `⚠️ 内容安全提示：${parsed.message || '您的请求包含敏感内容'}`
+              }
+              break
+            }
+            // 处理 system-error 数据
+            if (parsed.systemError) {
+              console.error('收到系统错误:', parsed)
+              message.error('系统错误，请稍后重试')
+              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
+              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
+              if (targetMsg) {
+                targetMsg.content = `❌ 系统错误，请稍后重试`
+              }
               break
             }
             // 处理 tool_call 数据
