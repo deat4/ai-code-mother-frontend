@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import {
@@ -73,6 +73,7 @@ const currentSessionId = ref<string | null>(null) // 当前生成会话 ID
 // 预览相关
 const showPreview = ref(false)
 const previewUrl = ref('')
+const previewSrcDoc = ref('')
 
 // 直接编辑应用状态
 const applyingEdit = ref(false)
@@ -111,6 +112,34 @@ const {
 // 获取应用信息使用的定时器引用
 let initPromptTimeoutId: ReturnType<typeof setTimeout> | null = null
 
+// SSE 期间的 Session 心跳保活定时器
+let sessionHeartbeatIntervalId: ReturnType<typeof setInterval> | null = null
+
+// Session 心跳保活函数（SSE 长连接期间保持 session 活跃）
+const startSessionHeartbeat = () => {
+  // 每 30 秒发送一次心跳请求，保持 session 活跃（小于 Redis session 默认超时）
+  sessionHeartbeatIntervalId = setInterval(async () => {
+    try {
+      // 使用专门的 session 保活接口
+      await fetch(`${import.meta.env.VITE_API_BASE_URL}/user/session/keepalive`, {
+        method: 'GET',
+        credentials: 'include',
+      })
+      console.log('[Session Heartbeat] session refreshed')
+    } catch (err) {
+      // 静默失败，不影响 SSE 流
+      console.warn('[Session Heartbeat] refresh failed:', err)
+    }
+  }, 30000) // 30 秒间隔
+}
+
+const stopSessionHeartbeat = () => {
+  if (sessionHeartbeatIntervalId) {
+    clearInterval(sessionHeartbeatIntervalId)
+    sessionHeartbeatIntervalId = null
+  }
+}
+
 // 重置组件状态
 const resetState = () => {
   // 清除自动发送初始消息的定时器
@@ -118,6 +147,8 @@ const resetState = () => {
     clearTimeout(initPromptTimeoutId)
     initPromptTimeoutId = null
   }
+  // 清除 Session 心跳定时器
+  stopSessionHeartbeat()
   messages.value = []
   app.value = undefined
   inputText.value = ''
@@ -125,6 +156,7 @@ const resetState = () => {
   generating.value = false
   showPreview.value = false
   previewUrl.value = ''
+  previewSrcDoc.value = ''
   // 重置对话历史分页状态
   hasMoreHistory.value = true
   loadingHistory.value = false
@@ -160,6 +192,14 @@ watch(
     }
   },
 )
+
+watch(previewUrl, (newUrl) => {
+  if (!newUrl) {
+    previewSrcDoc.value = ''
+    return
+  }
+  loadPreviewContent(newUrl)
+})
 
 // 格式化完整时间
 const formatDateTime = (time?: string) => {
@@ -244,6 +284,9 @@ const applyEditDirectly = async () => {
 
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
 
+    // 启动 Session 心跳保活
+    startSessionHeartbeat()
+
     const reader = response.body?.getReader()
     if (!reader) throw new Error('No reader available')
 
@@ -263,9 +306,6 @@ const applyEditDirectly = async () => {
         const trimmedLine = line.trim()
         if (trimmedLine.startsWith('event:session')) continue
         if (trimmedLine.startsWith('event:tool_call')) continue
-        if (trimmedLine.startsWith('event:business-error')) continue
-        if (trimmedLine.startsWith('event:guardrail-error')) continue
-        if (trimmedLine.startsWith('event:system-error')) continue
 
         if (trimmedLine.startsWith('data:')) {
           const data = trimmedLine.slice(5).trim()
@@ -274,53 +314,6 @@ const applyEditDirectly = async () => {
             if (parsed.sessionId) {
               currentSessionId.value = parsed.sessionId
               continue
-            }
-            // 处理 business-error 数据
-            if (parsed.error && parsed.code !== undefined) {
-              console.error('收到业务错误:', parsed)
-              if (parsed.code === 42988) {
-                message.warning('请求过于频繁，请等待60秒后再试')
-              } else if (parsed.code === 40100) {
-                message.warning('请先登录')
-                router.push('/user/login')
-              } else if (parsed.code === 40101) {
-                message.error('无权限访问该应用')
-              } else if (parsed.code === 40400) {
-                message.error('应用不存在')
-              } else {
-                message.error(parsed.message || '请求处理失败')
-              }
-              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
-              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
-              if (targetMsg) {
-                targetMsg.content = `❌ ${parsed.message || '请求处理失败'}`
-              }
-              break
-            }
-            // 处理 guardrail-error 数据（护轨错误 - 内容安全）
-            if (parsed.guardrailError) {
-              console.error('收到护轨错误:', parsed)
-              message.warning({
-                content: parsed.message || '内容安全提示：您的请求包含敏感内容',
-                duration: 5,
-              })
-              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
-              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
-              if (targetMsg) {
-                targetMsg.content = `⚠️ 内容安全提示：${parsed.message || '您的请求包含敏感内容'}`
-              }
-              break
-            }
-            // 处理 system-error 数据
-            if (parsed.systemError) {
-              console.error('收到系统错误:', parsed)
-              message.error('系统错误，请稍后重试')
-              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
-              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
-              if (targetMsg) {
-                targetMsg.content = `❌ 系统错误，请稍后重试`
-              }
-              break
             }
             if (parsed.type === 'tool_call') {
               codeFiles.value.push({
@@ -365,6 +358,8 @@ const applyEditDirectly = async () => {
 
             fetchAppInfo().catch((err) => console.error('刷新应用信息失败:', err))
           }
+          // 停止 Session 心跳保活
+          stopSessionHeartbeat()
         }
       }
     }
@@ -377,6 +372,8 @@ const applyEditDirectly = async () => {
     generating.value = false
     currentSessionId.value = null
     applyingEdit.value = false
+    // 确保 SSE 结束时停止心跳
+    stopSessionHeartbeat()
   }
 }
 
@@ -386,6 +383,63 @@ const focusInputForEdit = () => {
   const textarea = document.querySelector('.input-section textarea') as HTMLTextAreaElement
   if (textarea) {
     textarea.focus()
+  }
+}
+
+const extractHtmlFromJsonLike = (raw: string): string | null => {
+  const trimmed = raw.trim()
+
+  const parsePayload = (jsonText: string): string | null => {
+    try {
+      const parsed = JSON.parse(jsonText) as { html?: string }
+      if (parsed && typeof parsed.html === 'string') {
+        return parsed.html
+      }
+    } catch {
+      // ignore parse error
+    }
+    return null
+  }
+
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    const html = parsePayload(trimmed)
+    if (html) return html
+  }
+
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+  if (fenced?.[1]) {
+    const html = parsePayload(fenced[1].trim())
+    if (html) return html
+  }
+
+  return null
+}
+
+const buildPreviewHtmlDoc = (html: string, sourceUrl: string): string => {
+  const baseHref = new URL(sourceUrl, window.location.origin).toString()
+  if (/<head[\s>]/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1><base href="${baseHref}">`)
+  }
+  return `<!doctype html><html><head><base href="${baseHref}"></head><body>${html}</body></html>`
+}
+
+const loadPreviewContent = async (url: string) => {
+  previewSrcDoc.value = ''
+  if (!url) return
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    })
+    if (!response.ok) return
+
+    const rawText = await response.text()
+    const extractedHtml = extractHtmlFromJsonLike(rawText)
+    if (extractedHtml) {
+      previewSrcDoc.value = buildPreviewHtmlDoc(extractedHtml, url)
+    }
+  } catch (error) {
+    console.error('加载预览内容失败:', error)
   }
 }
 
@@ -420,9 +474,10 @@ const fetchAppInfo = async () => {
       if (messages.value.length >= 2) {
         showPreview.value = true
         // 优先使用后端返回的 previewUrl，否则自行拼接
-        previewUrl.value =
+        const baseUrl =
           app.value?.previewUrl ||
           `${import.meta.env.VITE_PREVIEW_DOMAIN}/${app.value?.codeGenType || 'HTML'}_${appId.value}/`
+        previewUrl.value = `${baseUrl}?t=${Date.now()}`
       }
     } else {
       message.error('获取应用信息失败')
@@ -534,6 +589,9 @@ const sendMessage = async () => {
 
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
 
+    // 启动 Session 心跳保活（SSE 长连接期间保持 session 活跃）
+    startSessionHeartbeat()
+
     const reader = response.body?.getReader()
     if (!reader) throw new Error('No reader available')
 
@@ -562,21 +620,6 @@ const sendMessage = async () => {
           continue
         }
 
-        // 处理 business-error 事件 - 业务错误（如限流）
-        if (trimmedLine.startsWith('event:business-error')) {
-          continue
-        }
-
-        // 处理 guardrail-error 事件 - 护轨错误（内容安全）
-        if (trimmedLine.startsWith('event:guardrail-error')) {
-          continue
-        }
-
-        // 处理 system-error 事件 - 系统错误
-        if (trimmedLine.startsWith('event:system-error')) {
-          continue
-        }
-
         if (trimmedLine.startsWith('data:')) {
           const data = trimmedLine.slice(5).trim()
           try {
@@ -585,60 +628,6 @@ const sendMessage = async () => {
             if (parsed.sessionId) {
               currentSessionId.value = parsed.sessionId
               continue
-            }
-            // 处理 business-error 数据
-            if (parsed.error && parsed.code !== undefined) {
-              console.error('收到业务错误:', parsed)
-              // 根据错误码显示不同提示
-              if (parsed.code === 42988) {
-                // 限流错误
-                message.warning('请求过于频繁，请等待60秒后再试')
-              } else if (parsed.code === 40100) {
-                // 未登录
-                message.warning('请先登录')
-                router.push('/user/login')
-              } else if (parsed.code === 40101) {
-                // 无权限
-                message.error('无权限访问该应用')
-              } else if (parsed.code === 40400) {
-                // 数据不存在
-                message.error('应用不存在')
-              } else {
-                // 其他业务错误
-                message.error(parsed.message || '请求处理失败')
-              }
-              // 更新 AI 消息为错误提示
-              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
-              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
-              if (targetMsg) {
-                targetMsg.content = `❌ ${parsed.message || '请求处理失败'}`
-              }
-              break
-            }
-            // 处理 guardrail-error 数据（护轨错误 - 内容安全）
-            if (parsed.guardrailError) {
-              console.error('收到护轨错误:', parsed)
-              message.warning({
-                content: parsed.message || '内容安全提示：您的请求包含敏感内容',
-                duration: 5,
-              })
-              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
-              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
-              if (targetMsg) {
-                targetMsg.content = `⚠️ 内容安全提示：${parsed.message || '您的请求包含敏感内容'}`
-              }
-              break
-            }
-            // 处理 system-error 数据
-            if (parsed.systemError) {
-              console.error('收到系统错误:', parsed)
-              message.error('系统错误，请稍后重试')
-              const msgIndex = messages.value.findIndex((m) => m.id === aiMessageId)
-              const targetMsg = msgIndex !== -1 ? messages.value[msgIndex] : undefined
-              if (targetMsg) {
-                targetMsg.content = `❌ 系统错误，请稍后重试`
-              }
-              break
             }
             // 处理 tool_call 数据
             if (parsed.type === 'tool_call') {
@@ -692,6 +681,19 @@ const sendMessage = async () => {
             // 刷新应用信息（更新版本号等）
             fetchAppInfo().catch((err) => console.error('刷新应用信息失败:', err))
           }
+
+          // Vue 项目构建等待提示
+          if (app.value?.codeGenType === 'VUE_PROJECT') {
+            message.info({
+              content: '代码生成完成，正在后台构建项目。预计需要30秒至2分钟，请稍后刷新页面查看预览。',
+              duration: 8,
+            })
+            // 启动预览状态轮询
+            pollPreviewStatus()
+          }
+
+          // 停止 Session 心跳保活
+          stopSessionHeartbeat()
         } // end else if (event:done)
       } // end for
     } // end while
@@ -703,7 +705,47 @@ const sendMessage = async () => {
     sending.value = false
     generating.value = false
     currentSessionId.value = null
+    // 确保 SSE 结束时停止心跳（无论成功或失败）
+    stopSessionHeartbeat()
   }
+}
+
+// 预览状态轮询（Vue 项目构建完成后自动检测）
+const pollPreviewStatus = () => {
+  if (!appId.value || app.value?.codeGenType !== 'VUE_PROJECT') return
+
+  const maxPolls = 20 // 最多轮询20次（约2分钟）
+  let pollCount = 0
+
+  const pollInterval = setInterval(async () => {
+    pollCount++
+    try {
+      const baseUrl =
+        app.value?.previewUrl ||
+        `${import.meta.env.VITE_PREVIEW_DOMAIN}/${app.value?.codeGenType}_${appId.value}/`
+      const checkUrl = `${baseUrl}index.html?t=${Date.now()}`
+
+      const response = await fetch(checkUrl, {
+        method: 'GET',
+        credentials: 'include',
+      })
+
+      if (response.ok) {
+        clearInterval(pollInterval)
+        message.success('项目构建完成，可以预览了！')
+        // 自动刷新预览
+        previewUrl.value = `${baseUrl}?t=${Date.now()}`
+        showPreview.value = true
+      }
+    } catch {
+      // 预览未就绪，继续轮询
+    }
+
+    if (pollCount >= maxPolls) {
+      clearInterval(pollInterval)
+      message.warning('构建时间较长，请稍后手动刷新查看预览')
+    }
+  }, 6000) // 每6秒轮询一次
 }
 
 // 停止 AI 生成
@@ -913,6 +955,15 @@ const handleEditApp = () => {
 onMounted(() => {
   fetchAppInfo()
 })
+
+onUnmounted(() => {
+  // 组件卸载时清理所有定时器
+  stopSessionHeartbeat()
+  if (initPromptTimeoutId) {
+    clearTimeout(initPromptTimeoutId)
+    initPromptTimeoutId = null
+  }
+})
 </script>
 
 <template>
@@ -1117,7 +1168,8 @@ onMounted(() => {
         <div class="preview-container">
           <iframe
             ref="previewIframeRef"
-            :src="previewUrl"
+            :src="previewSrcDoc ? undefined : previewUrl"
+            :srcdoc="previewSrcDoc || undefined"
             class="preview-frame"
             :class="{ 'edit-mode': isEditMode }"
             @load="onIframeLoad"
@@ -1352,6 +1404,7 @@ onMounted(() => {
 
 .code-content code {
   background: transparent;
+  color: #c9d1d9; /* github-dark 默认文字颜色 */
 }
 
 /* 预览区头部样式 */

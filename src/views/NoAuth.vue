@@ -25,34 +25,45 @@ const goHome = () => {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: #f0f2f5;
+  background: var(--color-surface-base);
+  padding: var(--space-8) var(--space-4);
 }
 
 .content {
   text-align: center;
-  padding: 48px;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: var(--space-12);
+  background: var(--color-surface-base);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
 }
 
 .title {
-  font-size: 72px;
-  font-weight: 700;
-  color: #ff4d4f;
-  margin-bottom: 16px;
+  font-size: var(--font-size-48);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent);
+  margin-bottom: var(--space-4);
+  line-height: var(--line-height-tight);
 }
 
 .subtitle {
-  font-size: 24px;
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 12px;
+  font-size: var(--font-size-20);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-3);
 }
 
 .description {
-  font-size: 14px;
-  color: #666;
-  margin-bottom: 24px;
+  font-size: var(--font-size-14);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-6);
+}
+
+@media (max-width: 768px) {
+  .content {
+    width: 100%;
+    padding: var(--space-8) var(--space-4);
+    border-radius: var(--radius-md);
+  }
 }
 </style>

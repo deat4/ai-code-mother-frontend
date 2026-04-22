@@ -1,4 +1,4 @@
-import axios from 'axios'
+﻿import axios from 'axios'
 import type {
   AxiosInstance,
   AxiosRequestConfig,
@@ -16,11 +16,11 @@ const DEFAULT_CONFIG: AxiosRequestConfig = {
   withCredentials: true,
 }
 
-
 /**
  * 创建 Axios 实例
  */
 const request: AxiosInstance = axios.create(DEFAULT_CONFIG)
+let lastAuthWarningTime = 0
 
 /**
  * 全局请求拦截器
@@ -49,13 +49,24 @@ request.interceptors.response.use(
 
     // 未登录处理
     if (data.code === 40100) {
-      // 不是获取用户信息的请求，且不在登录页面，则跳转登录页
-      if (
-        !response.request.responseURL.includes('user/get/login') &&
-        !window.location.pathname.includes('/user/login')
-      ) {
-        message.warning('请先登录')
-        window.location.href = `/user/login?redirect=${window.location.href}`
+      const pathname = window.location.pathname
+      const onLoginPage = pathname.includes('/user/login')
+      const onChatPage = pathname.startsWith('/app/chat/')
+      const isGetLoginUserRequest = response.request.responseURL.includes('user/get/login')
+
+      // 不是获取用户信息的请求，且不在登录页才处理未登录态
+      if (!isGetLoginUserRequest && !onLoginPage) {
+        const now = Date.now()
+        if (now - lastAuthWarningTime > 5000) {
+          message.warning('登录状态已过期，请先登录后重试')
+          lastAuthWarningTime = now
+        }
+
+        // 聊天页避免打断长时间生成流程，仅提示不自动跳转
+        if (!onChatPage) {
+          const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`
+          window.location.href = `/user/login?redirect=${encodeURIComponent(redirect)}`
+        }
       }
     }
 

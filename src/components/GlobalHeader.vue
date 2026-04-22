@@ -112,10 +112,9 @@ const doLogout = async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
+  padding: 0 var(--space-6);
   height: 64px;
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  background: var(--color-surface-base);
 }
 
 .header-left {
@@ -127,7 +126,7 @@ const doLogout = async () => {
 .logo-wrapper {
   display: flex;
   align-items: center;
-  margin-right: 24px;
+  margin-right: var(--space-6);
 }
 
 .logo {
@@ -136,10 +135,10 @@ const doLogout = async () => {
 }
 
 .title {
-  margin-left: 12px;
-  font-size: 18px;
-  font-weight: 600;
-  color: #1890ff;
+  margin-left: var(--space-3);
+  font-size: var(--font-size-16);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-accent);
   white-space: nowrap;
 }
 
@@ -151,12 +150,12 @@ const doLogout = async () => {
 .header-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 @media (max-width: 768px) {
   .global-header {
-    padding: 0 12px;
+    padding: 0 var(--space-3);
   }
 
   .title {

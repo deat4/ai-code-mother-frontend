@@ -27,13 +27,16 @@ const { Header, Content, Footer } = Layout
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background: var(--color-surface-subtle);
 }
 
 .layout-header {
-  padding: 0;
+  padding: var(--space-0);
   height: 64px;
   line-height: 64px;
-  background: #fff;
+  background: var(--color-surface-base);
+  border-bottom: 1px solid var(--color-border-subtle);
+  box-shadow: var(--shadow-1);
   position: sticky;
   top: 0;
   z-index: 100;
@@ -41,32 +44,35 @@ const { Header, Content, Footer } = Layout
 
 .layout-content {
   flex: 1;
-  background: #f0f2f5;
-  padding: 24px 50px;
+  background: var(--color-surface-subtle);
+  padding: var(--space-6) var(--space-10);
 }
 
 .content-wrapper {
   max-width: 1200px;
   margin: 0 auto;
-  background: #fff;
-  padding: 24px;
-  border-radius: 8px;
+  background: var(--color-surface-base);
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-subtle);
+  box-shadow: var(--shadow-1);
   min-height: calc(100vh - 64px - 120px - 48px);
 }
 
 .layout-footer {
-  padding: 0;
-  background: #f0f2f5;
+  padding: var(--space-0);
+  background: var(--color-surface-subtle);
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 @media (max-width: 768px) {
   .layout-content {
-    padding: 16px 12px;
+    padding: var(--space-4) var(--space-3);
   }
 
   .content-wrapper {
-    padding: 16px;
-    border-radius: 4px;
+    padding: var(--space-4);
+    border-radius: var(--radius-md);
   }
 }
 </style>

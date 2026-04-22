@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed } from 'vue'
 import { marked, type Tokens } from 'marked'
 import hljs from 'highlight.js'
@@ -6,6 +6,10 @@ import DOMPurify from 'dompurify'
 
 interface Props {
   content: string
+}
+
+interface HtmlPayload {
+  html?: string
 }
 
 const props = defineProps<Props>()
@@ -19,35 +23,56 @@ const renderer = {
   },
 }
 
-// 推荐局部应用 renderer，避免污染全局的 marked 实例
+// Use local renderer to avoid polluting global marked instance
 marked.use({ renderer })
+
+const tryParseHtmlPayload = (raw: string): string | null => {
+  const trimmed = raw.trim()
+
+  const parsePayload = (jsonText: string): string | null => {
+    try {
+      const parsed = JSON.parse(jsonText) as HtmlPayload
+      if (parsed && typeof parsed.html === 'string') {
+        return parsed.html
+      }
+    } catch {
+      // Ignore parse errors and fall back to normal markdown rendering
+    }
+    return null
+  }
+
+  // 1) Plain JSON: { "html": "..." }
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    const html = parsePayload(trimmed)
+    if (html) return html
+  }
+
+  // 2) Fenced JSON: ```json { "html": "..." } ```
+  const fencedMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+  if (fencedMatch?.[1]) {
+    const html = parsePayload(fencedMatch[1].trim())
+    if (html) return html
+  }
+
+  return null
+}
 
 const renderedContent = computed(() => {
   if (!props.content) return ''
 
   let contentToRender = props.content
-
-  // 尝试解析 JSON 格式的响应（后端返回 { "html": "..." }）
-  // 只有当内容是完整的 JSON 时才解析（以 { 开头，以 } 结尾）
-  const trimmedContent = props.content.trim()
-  if (trimmedContent.startsWith('{') && trimmedContent.endsWith('}')) {
-    try {
-      const parsed = JSON.parse(trimmedContent)
-      if (parsed && typeof parsed.html === 'string') {
-        contentToRender = parsed.html
-      }
-    } catch {
-      // JSON 解析失败，可能是正在流式传输中，直接渲染原始内容
-    }
+  const extractedHtml = tryParseHtmlPayload(props.content)
+  if (extractedHtml) {
+    contentToRender = extractedHtml
   }
 
-  // 如果内容是 HTML（以 <!DOCTYPE 或 <html 或 <head 开头），直接渲染为 HTML
+  // If content is HTML, render directly
+  const normalized = contentToRender.trim().toLowerCase()
   if (
-    contentToRender.trim().toLowerCase().startsWith('<!doctype') ||
-    contentToRender.trim().toLowerCase().startsWith('<html') ||
-    contentToRender.trim().toLowerCase().startsWith('<head')
+    normalized.startsWith('<!doctype') ||
+    normalized.startsWith('<html') ||
+    normalized.startsWith('<head')
   ) {
-    // 直接渲染 HTML 内容，不进行 Markdown 解析
     return DOMPurify.sanitize(contentToRender, {
       ADD_ATTR: ['class', 'style', 'id', 'data-*'],
       ADD_TAGS: ['style', 'script'],
@@ -57,7 +82,7 @@ const renderedContent = computed(() => {
   // Parse markdown and sanitize for XSS protection
   const rawHtml = marked.parse(contentToRender) as string
   return DOMPurify.sanitize(rawHtml, {
-    ADD_ATTR: ['class'], // Allow class attribute for syntax highlighting
+    ADD_ATTR: ['class'],
   })
 })
 </script>
@@ -74,9 +99,6 @@ const renderedContent = computed(() => {
   line-height: 1.6;
   word-wrap: break-word;
 }
-
-/* 使用 :deep() 确保 scoped 样式能够穿透并应用到 v-html 动态生成的 DOM 上
-*/
 
 /* Headings */
 .markdown-content :deep(h1),
@@ -131,6 +153,8 @@ const renderedContent = computed(() => {
   overflow-x: auto;
   margin: 0.75em 0;
   position: relative;
+  white-space: pre-wrap; /* 保留空白但允许换行 */
+  word-break: break-word; /* 长单词/代码在边界换行 */
 }
 
 .markdown-content :deep(pre code) {
@@ -139,6 +163,7 @@ const renderedContent = computed(() => {
   line-height: 1.5;
   background: transparent;
   padding: 0;
+  color: #c9d1d9; /* github-dark 默认文字颜色，确保流式生成时也能看清 */
 }
 
 /* Inline code */

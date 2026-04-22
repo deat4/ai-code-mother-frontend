@@ -72,41 +72,54 @@ const handleSubmit = async (values: API.UserRegisterRequest) => {
 
 <style scoped>
 #userRegisterPage {
-  max-width: 360px;
+  width: 100%;
+  max-width: 400px;
   margin: 0 auto;
-  padding: 32px;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: var(--space-8) var(--space-6);
+  background: var(--color-surface-base);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
 }
 
 .title {
   text-align: center;
-  margin-bottom: 8px;
-  font-size: 24px;
-  font-weight: 600;
-  color: #333;
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-20);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  color: var(--color-text-primary);
+  text-wrap: balance;
 }
 
 .desc {
   text-align: center;
-  margin-bottom: 24px;
-  color: #666;
-  font-size: 14px;
+  margin-bottom: var(--space-6);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-14);
+  text-wrap: pretty;
 }
 
 .tips {
   text-align: right;
-  margin-bottom: 16px;
-  color: #999;
-  font-size: 14px;
+  margin-bottom: var(--space-4);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-14);
 }
 
 .tips a {
-  color: #1890ff;
+  color: var(--color-accent);
 }
 
 .tips a:hover {
-  color: #40a9ff;
+  color: var(--color-accent-hover);
+}
+
+@media (max-width: 768px) {
+  #userRegisterPage {
+    max-width: 100%;
+    padding: var(--space-6) var(--space-4);
+    border-radius: var(--radius-md);
+  }
 }
 </style>

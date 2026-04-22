@@ -18,32 +18,32 @@ const currentYear = new Date().getFullYear()
 
 <style scoped>
 .global-footer {
-  padding: 24px 50px;
-  background: #f0f2f5;
+  padding: var(--space-6) var(--space-10);
+  background: var(--color-surface-subtle);
   text-align: center;
 }
 
 .footer-content {
-  color: rgba(0, 0, 0, 0.65);
-  font-size: 14px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-14);
 }
 
 .footer-content a {
-  color: #1890ff;
+  color: var(--color-accent);
   text-decoration: none;
 }
 
 .footer-content a:hover {
-  color: #40a9ff;
+  color: var(--color-accent-hover);
 }
 
 .copyright {
-  margin-left: 8px;
+  margin-left: var(--space-2);
 }
 
 @media (max-width: 768px) {
   .global-footer {
-    padding: 16px 24px;
+    padding: var(--space-4) var(--space-6);
   }
 }
 </style>

@@ -200,3 +200,40 @@ const resetState = () => {
 - Run `npm run type-check` to verify types
 - Use Ant Design Vue components for UI
 - Run `npm run openapi2ts` when backend API changes
+
+## Project UI Migration Rules
+
+### Goal
+
+Migrate the existing frontend toward an Apple-inspired visual language.
+
+### Keep Unchanged
+
+- Do not change backend APIs
+- Do not change business logic
+- Do not rename routes unless necessary
+- Preserve existing component props where possible
+
+### Visual Direction
+
+- Use the installed Apple UI skill when making UI decisions
+- Prefer light mode by default
+- Prefer clean whitespace and strong hierarchy
+- Reduce visual noise
+- Avoid heavy shadows and flashy gradients
+- Avoid excessive animation
+
+### Implementation Strategy
+
+1. Audit current design tokens, shared components, layout primitives, and page shells
+2. Refactor theme tokens first
+3. Update shared primitives second
+4. Migrate one representative page first
+5. After review, migrate the remaining pages in batches
+
+### Tech Constraints
+
+- Prefer CSS variables / Tailwind tokens over hardcoded values
+- Reuse existing components first
+- Keep diffs small and reviewable
+- Do not perform a full rewrite unless explicitly asked
