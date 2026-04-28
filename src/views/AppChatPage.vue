@@ -11,13 +11,24 @@ import {
 } from '@/api/appController'
 import { listAppChatHistory, saveUserMessage, saveAiMessage } from '@/api/chatHistoryController'
 import { diffVersions, createVersion } from '@/api/appVersionController'
+import { getTask, getLatestTaskByApp, parseTaskResponse } from '@/api/taskController'
 
 import { useLoginUserStore } from '@/stores/loginUser'
 import { useVisualEditor } from '@/composables/useVisualEditor'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import VersionList from '@/components/VersionList.vue'
 import VersionDiff from '@/components/VersionDiff.vue'
+import TaskStatusCard from '@/components/TaskStatusCard.vue'
+import ValidationResultPanel from '@/components/ValidationResultPanel.vue'
 import hljs from 'highlight.js'
+import {
+  TaskStatus,
+  TaskStage,
+  normalizeTaskStatus,
+  normalizeTaskStage,
+  type TaskInfo,
+  type ValidationResult,
+} from '@/types/task'
 
 const route = useRoute()
 const router = useRouter()
@@ -69,6 +80,11 @@ const totalHistoryCount = ref(0)
 
 // AI 生成相关
 const currentSessionId = ref<string | null>(null) // 当前生成会话 ID
+
+// 任务状态相关（最小侵入式新增）
+const currentTaskInfo = ref<TaskInfo | undefined>(undefined) // 当前任务信息
+const currentValidationResult = ref<ValidationResult | undefined>(undefined) // 校验结果
+const isStoppingTask = ref(false) // 是否正在停止任务
 
 // 预览相关
 const showPreview = ref(false)
@@ -163,6 +179,10 @@ const resetState = () => {
   oldestMessageTime.value = null
   totalHistoryCount.value = 0
   currentSessionId.value = null
+  // 重置任务状态（最小侵入式新增）
+  currentTaskInfo.value = undefined
+  currentValidationResult.value = undefined
+  isStoppingTask.value = false
   // 重置可视化编辑器状态
   clearSelectedElement()
   clearEditedElement()
@@ -306,6 +326,10 @@ const applyEditDirectly = async () => {
         const trimmedLine = line.trim()
         if (trimmedLine.startsWith('event:session')) continue
         if (trimmedLine.startsWith('event:tool_call')) continue
+        // 处理新事件（最小侵入式新增）
+        if (trimmedLine.startsWith('event:task_created')) continue
+        if (trimmedLine.startsWith('event:stage_changed')) continue
+        if (trimmedLine.startsWith('event:validation_result')) continue
 
         if (trimmedLine.startsWith('data:')) {
           const data = trimmedLine.slice(5).trim()
@@ -313,6 +337,53 @@ const applyEditDirectly = async () => {
             const parsed = JSON.parse(data)
             if (parsed.sessionId) {
               currentSessionId.value = parsed.sessionId
+              continue
+            }
+            // 处理 task_created 数据（最小侵入式新增）
+            if (parsed.taskId !== undefined && parsed.status !== undefined) {
+              currentTaskInfo.value = {
+                taskId: parsed.taskId,
+                sessionId: currentSessionId.value || undefined,
+                status: normalizeTaskStatus(parsed.status),
+                currentStage: normalizeTaskStage(parsed.stage),
+              }
+              continue
+            }
+            // 处理 stage_changed 数据（最小侵入式新增）
+            if (parsed.stage !== undefined && currentTaskInfo.value?.taskId === parsed.taskId) {
+              const existingTask = currentTaskInfo.value!
+              currentTaskInfo.value = {
+                taskId: existingTask.taskId,
+                sessionId: existingTask.sessionId,
+                status: existingTask.status,
+                currentStage: normalizeTaskStage(parsed.stage),
+                errorMessage: existingTask.errorMessage,
+                validationSummary: existingTask.validationSummary,
+                validationPassed: existingTask.validationPassed,
+                issueCount: existingTask.issueCount,
+                buildResult: existingTask.buildResult,
+              }
+              continue
+            }
+            // 处理 validation_result 数据（最小侵入式新增）
+            if (parsed.passed !== undefined) {
+              currentValidationResult.value = {
+                taskId: parsed.taskId ?? currentTaskInfo.value?.taskId,
+                passed: parsed.passed,
+                summary: parsed.summary,
+                stage: parsed.stage,
+                issues: parsed.issues,
+                buildResult: parsed.buildResult,
+              }
+              if (parsed.passed === false && currentTaskInfo.value) {
+                currentTaskInfo.value = {
+                  ...currentTaskInfo.value,
+                  validationPassed: false,
+                  validationSummary: parsed.summary,
+                  issueCount: parsed.issues?.length ?? 0,
+                  buildResult: parsed.buildResult,
+                }
+              }
               continue
             }
             if (parsed.type === 'tool_call') {
@@ -460,6 +531,9 @@ const fetchAppInfo = async () => {
 
       // 加载对话历史
       await loadChatHistory()
+
+      // 恢复最近任务状态（最小侵入式新增，宽松处理）
+      restoreLatestTaskStatus().catch((err) => console.warn('恢复任务状态失败:', err))
 
       // 只有是自己的 app 且没有对话历史时，才自动发送初始消息
       if (isOwner.value && messages.value.length === 0 && app.value?.initPrompt) {
@@ -615,6 +689,21 @@ const sendMessage = async () => {
           continue
         }
 
+        // 处理 task_created 事件（最小侵入式新增）
+        if (trimmedLine.startsWith('event:task_created')) {
+          continue
+        }
+
+        // 处理 stage_changed 事件（最小侵入式新增）
+        if (trimmedLine.startsWith('event:stage_changed')) {
+          continue
+        }
+
+        // 处理 validation_result 事件（最小侵入式新增）
+        if (trimmedLine.startsWith('event:validation_result')) {
+          continue
+        }
+
         // 处理 tool_call 事件 - 下一个 data 行包含文件信息
         if (trimmedLine.startsWith('event:tool_call')) {
           continue
@@ -627,6 +716,54 @@ const sendMessage = async () => {
             // 保存 sessionId
             if (parsed.sessionId) {
               currentSessionId.value = parsed.sessionId
+              continue
+            }
+            // 处理 task_created 数据（最小侵入式新增）
+            if (parsed.taskId !== undefined && parsed.status !== undefined) {
+              currentTaskInfo.value = {
+                taskId: parsed.taskId,
+                sessionId: currentSessionId.value || undefined,
+                status: normalizeTaskStatus(parsed.status),
+                currentStage: normalizeTaskStage(parsed.stage),
+              }
+              continue
+            }
+            // 处理 stage_changed 数据（最小侵入式新增）
+            if (parsed.stage !== undefined && currentTaskInfo.value?.taskId === parsed.taskId) {
+              const existingTask = currentTaskInfo.value!
+              currentTaskInfo.value = {
+                taskId: existingTask.taskId,
+                sessionId: existingTask.sessionId,
+                status: existingTask.status,
+                currentStage: normalizeTaskStage(parsed.stage),
+                errorMessage: existingTask.errorMessage,
+                validationSummary: existingTask.validationSummary,
+                validationPassed: existingTask.validationPassed,
+                issueCount: existingTask.issueCount,
+                buildResult: existingTask.buildResult,
+              }
+              continue
+            }
+            // 处理 validation_result 数据（最小侵入式新增）
+            if (parsed.passed !== undefined) {
+              currentValidationResult.value = {
+                taskId: parsed.taskId ?? currentTaskInfo.value?.taskId,
+                passed: parsed.passed,
+                summary: parsed.summary,
+                stage: parsed.stage,
+                issues: parsed.issues,
+                buildResult: parsed.buildResult,
+              }
+              // 如果校验失败，更新任务状态（作为展示兜底）
+              if (parsed.passed === false && currentTaskInfo.value) {
+                currentTaskInfo.value = {
+                  ...currentTaskInfo.value,
+                  validationPassed: false,
+                  validationSummary: parsed.summary,
+                  issueCount: parsed.issues?.length ?? 0,
+                  buildResult: parsed.buildResult,
+                }
+              }
               continue
             }
             // 处理 tool_call 数据
@@ -752,17 +889,90 @@ const pollPreviewStatus = () => {
 const handleStopGeneration = async () => {
   if (!currentSessionId.value) return
 
+  isStoppingTask.value = true
   try {
     const res = await stopGeneration({ sessionId: currentSessionId.value })
     if (res.data.code === 0) {
       message.success('已停止生成')
+      // 立即更新前端任务状态为取消中
+      if (currentTaskInfo.value) {
+        currentTaskInfo.value = {
+          ...currentTaskInfo.value,
+          status: TaskStatus.CANCELED,
+        }
+      }
+      // 兜底刷新任务状态
+      if (currentTaskInfo.value?.taskId) {
+        try {
+          const taskRes = await getTask(currentTaskInfo.value.taskId)
+          if (taskRes.data.code === 0 && taskRes.data.data) {
+            const taskData = parseTaskResponse(taskRes.data.data)
+            currentTaskInfo.value = {
+              ...currentTaskInfo.value,
+              ...taskData,
+            }
+          }
+        } catch (err) {
+          console.warn('刷新任务状态失败:', err)
+        }
+      }
+    } else {
+      message.error('停止生成失败：' + (res.data.message ?? '未知错误'))
     }
   } catch (error) {
     console.error('停止生成失败:', error)
+    message.error('停止生成失败')
   } finally {
     generating.value = false
     sending.value = false
     currentSessionId.value = null
+    isStoppingTask.value = false
+    stopSessionHeartbeat()
+  }
+}
+
+// 刷新当前任务状态（最小侵入式新增）
+const refreshTaskStatus = async () => {
+  if (!currentTaskInfo.value?.taskId) return
+  try {
+    const res = await getTask(currentTaskInfo.value.taskId)
+    if (res.data.code === 0 && res.data.data) {
+      const taskData = parseTaskResponse(res.data.data)
+      currentTaskInfo.value = {
+        ...currentTaskInfo.value,
+        ...taskData,
+      }
+    }
+  } catch (err) {
+    console.warn('刷新任务状态失败:', err)
+  }
+}
+
+// 页面刷新后恢复最近任务状态（最小侵入式新增）
+const restoreLatestTaskStatus = async () => {
+  if (!appId.value || currentTaskInfo.value?.taskId) return
+  try {
+    const res = await getLatestTaskByApp(appId.value)
+    if (res.data.code === 0 && res.data.data) {
+      const taskData = parseTaskResponse(res.data.data)
+      // 只有任务状态不是 RUNNING 才恢复（避免干扰正在进行的生成）
+      const normalizedStatus = normalizeTaskStatus(taskData.status)
+      if (normalizedStatus !== TaskStatus.RUNNING) {
+        currentTaskInfo.value = taskData
+        // 如果有校验信息，也恢复
+        if (taskData.validationSummary || taskData.validationPassed !== undefined) {
+          currentValidationResult.value = {
+            taskId: taskData.taskId,
+            passed: taskData.validationPassed,
+            summary: taskData.validationSummary,
+            buildResult: taskData.buildResult,
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // 恢复失败不影响页面主功能
+    console.warn('恢复任务状态失败:', err)
   }
 }
 
@@ -1029,6 +1239,24 @@ onUnmounted(() => {
         </div>
 
         <div class="input-section">
+          <!-- 任务状态卡片（最小侵入式新增） -->
+          <TaskStatusCard
+            v-if="currentTaskInfo"
+            :task-info="currentTaskInfo"
+            :validation-result="currentValidationResult"
+            :is-stopping="isStoppingTask"
+            @stop="handleStopGeneration"
+            @refresh="refreshTaskStatus"
+          />
+
+          <!-- 校验结果面板（最小侵入式新增） -->
+          <ValidationResultPanel
+            v-if="currentValidationResult || currentTaskInfo?.validationSummary"
+            :validation-result="currentValidationResult"
+            :issue-count="currentTaskInfo?.issueCount"
+            :build-result="currentTaskInfo?.buildResult"
+          />
+
           <!-- 选中元素信息展示（单选模式） -->
           <a-alert
             v-if="hasSelectedElement"
