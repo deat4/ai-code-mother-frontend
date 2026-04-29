@@ -719,9 +719,11 @@ const sendMessage = async () => {
               continue
             }
             // 处理 task_created 数据（最小侵入式新增）
-            if (parsed.taskId !== undefined && parsed.status !== undefined) {
+            // 兼容 taskId 和 id 两种字段名
+            const parsedTaskId = parsed.taskId ?? parsed.id
+            if (parsedTaskId !== undefined && parsed.status !== undefined) {
               currentTaskInfo.value = {
-                taskId: parsed.taskId,
+                taskId: parsedTaskId,
                 sessionId: currentSessionId.value || undefined,
                 status: normalizeTaskStatus(parsed.status),
                 currentStage: normalizeTaskStage(parsed.stage),
@@ -729,7 +731,8 @@ const sendMessage = async () => {
               continue
             }
             // 处理 stage_changed 数据（最小侵入式新增）
-            if (parsed.stage !== undefined && currentTaskInfo.value?.taskId === parsed.taskId) {
+            const stageChangedTaskId = parsed.taskId ?? parsed.id
+            if (parsed.stage !== undefined && currentTaskInfo.value?.taskId === stageChangedTaskId) {
               const existingTask = currentTaskInfo.value!
               currentTaskInfo.value = {
                 taskId: existingTask.taskId,
@@ -924,6 +927,19 @@ const pollPreviewStatus = () => {
 
 // 任务状态轮询（获取验收结果）
 const pollTaskStatus = () => {
+  // 如果没有 taskId，尝试使用 appId 获取最新任务
+  if (!currentTaskInfo.value?.taskId && appId.value) {
+    getLatestTaskByApp(appId.value)
+      .then((res) => {
+        if (res.data.code === 0 && res.data.data) {
+          const taskData = parseTaskResponse(res.data.data)
+          currentTaskInfo.value = taskData
+        }
+      })
+      .catch((err) => console.warn('获取最新任务失败:', err))
+    return
+  }
+
   if (!currentTaskInfo.value?.taskId) return
 
   const maxPolls = 15 // 最多轮询15次（约90秒）
@@ -967,6 +983,32 @@ const pollTaskStatus = () => {
       }
     } catch (err) {
       console.warn('轮询任务状态失败:', err)
+      // 如果 getTask 失败，尝试用 getLatestTaskByApp 兜底
+      if (appId.value) {
+        try {
+          const latestRes = await getLatestTaskByApp(appId.value)
+          if (latestRes.data.code === 0 && latestRes.data.data) {
+            const taskData = parseTaskResponse(latestRes.data.data)
+            currentTaskInfo.value = taskData
+            // 更新校验结果
+            if (taskData.validationSummary || taskData.validationPassed !== undefined) {
+              currentValidationResult.value = {
+                taskId: taskData.taskId,
+                passed: taskData.validationPassed,
+                summary: taskData.validationSummary,
+                buildResult: taskData.buildResult,
+              }
+            }
+            // 如果任务已完成，停止轮询
+            const normalizedStatus = normalizeTaskStatus(taskData.status)
+            if (normalizedStatus !== TaskStatus.RUNNING) {
+              clearInterval(pollInterval)
+            }
+          }
+        } catch (fallbackErr) {
+          console.warn('兜底查询任务失败:', fallbackErr)
+        }
+      }
     }
 
     if (pollCount >= maxPolls) {
