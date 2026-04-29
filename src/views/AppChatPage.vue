@@ -829,6 +829,9 @@ const sendMessage = async () => {
             pollPreviewStatus()
           }
 
+          // 启动任务状态轮询（获取验收结果）
+          pollTaskStatus()
+
           // 停止 Session 心跳保活
           stopSessionHeartbeat()
         } // end else if (event:done)
@@ -873,9 +876,43 @@ const pollPreviewStatus = () => {
         // 自动刷新预览
         previewUrl.value = `${baseUrl}?t=${Date.now()}`
         showPreview.value = true
+        // 构建完成后刷新任务状态（获取最终验收结果）
+        refreshTaskStatus()
       }
     } catch {
       // 预览未就绪，继续轮询
+    }
+
+    // 同时轮询任务状态（获取验收进度）
+    if (currentTaskInfo.value?.taskId) {
+      try {
+        const taskRes = await getTask(currentTaskInfo.value.taskId)
+        if (taskRes.data.code === 0 && taskRes.data.data) {
+          const taskData = parseTaskResponse(taskRes.data.data)
+          currentTaskInfo.value = {
+            taskId: currentTaskInfo.value.taskId,
+            sessionId: currentTaskInfo.value.sessionId,
+            status: taskData.status,
+            currentStage: taskData.currentStage,
+            errorMessage: taskData.errorMessage,
+            validationSummary: taskData.validationSummary,
+            validationPassed: taskData.validationPassed,
+            issueCount: taskData.issueCount,
+            buildResult: taskData.buildResult,
+          }
+          // 如果有校验信息，更新校验结果
+          if (taskData.validationSummary || taskData.validationPassed !== undefined) {
+            currentValidationResult.value = {
+              taskId: taskData.taskId,
+              passed: taskData.validationPassed,
+              summary: taskData.validationSummary,
+              buildResult: taskData.buildResult,
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('轮询任务状态失败:', err)
+      }
     }
 
     if (pollCount >= maxPolls) {
@@ -883,6 +920,61 @@ const pollPreviewStatus = () => {
       message.warning('构建时间较长，请稍后手动刷新查看预览')
     }
   }, 6000) // 每6秒轮询一次
+}
+
+// 任务状态轮询（获取验收结果）
+const pollTaskStatus = () => {
+  if (!currentTaskInfo.value?.taskId) return
+
+  const maxPolls = 15 // 最多轮询15次（约90秒）
+  let pollCount = 0
+
+  const pollInterval = setInterval(async () => {
+    pollCount++
+    try {
+      const taskRes = await getTask(currentTaskInfo.value!.taskId)
+      if (taskRes.data.code === 0 && taskRes.data.data) {
+        const taskData = parseTaskResponse(taskRes.data.data)
+        const normalizedStatus = normalizeTaskStatus(taskData.status)
+
+        // 更新任务状态
+        currentTaskInfo.value = {
+          taskId: currentTaskInfo.value!.taskId,
+          sessionId: currentTaskInfo.value!.sessionId,
+          status: taskData.status,
+          currentStage: taskData.currentStage,
+          errorMessage: taskData.errorMessage,
+          validationSummary: taskData.validationSummary,
+          validationPassed: taskData.validationPassed,
+          issueCount: taskData.issueCount,
+          buildResult: taskData.buildResult,
+        }
+
+        // 如果有校验信息，更新校验结果
+        if (taskData.validationSummary || taskData.validationPassed !== undefined) {
+          currentValidationResult.value = {
+            taskId: taskData.taskId,
+            passed: taskData.validationPassed,
+            summary: taskData.validationSummary,
+            buildResult: taskData.buildResult,
+          }
+        }
+
+        // 如果任务已完成（非运行状态），停止轮询
+        if (normalizedStatus !== TaskStatus.RUNNING) {
+          clearInterval(pollInterval)
+        }
+      }
+    } catch (err) {
+      console.warn('轮询任务状态失败:', err)
+    }
+
+    if (pollCount >= maxPolls) {
+      clearInterval(pollInterval)
+    }
+  }, 5000) // 每5秒轮询一次任务状态
+
+  return pollInterval
 }
 
 // 停止 AI 生成
