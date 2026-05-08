@@ -5,6 +5,7 @@ import type { ValidationResult, ValidationIssue, BuildResult } from '@/types/tas
 const props = defineProps<{
   validationResult?: ValidationResult
   issueCount?: number
+  warningCount?: number
   buildResult?: BuildResult
 }>()
 
@@ -17,6 +18,7 @@ const showPanel = computed(() => {
   return (
     props.validationResult !== undefined ||
     props.issueCount !== undefined ||
+    props.warningCount !== undefined ||
     props.buildResult !== undefined
   )
 })
@@ -39,6 +41,28 @@ const issues = computed(() => {
 // 问题数量
 const displayIssueCount = computed(() => {
   return props.issueCount ?? issues.value.length ?? 0
+})
+
+// 警告数量
+const displayWarningCount = computed(() => {
+  return props.warningCount ?? 0
+})
+
+// 状态文案（综合展示）
+const statusSummaryText = computed(() => {
+  if (passed.value === true) {
+    if (displayWarningCount.value > 0) {
+      return `校验通过，但存在 ${displayWarningCount.value} 个警告`
+    }
+    return '校验通过，没有发现问题'
+  }
+  if (passed.value === false) {
+    if (displayIssueCount.value > 0) {
+      return `校验未通过，发现 ${displayIssueCount.value} 个错误`
+    }
+    return '校验未通过'
+  }
+  return summary.value || '校验结果'
 })
 
 // 关键错误
@@ -97,9 +121,10 @@ const toggleBuildLog = () => {
         <a-tag :color="passed === true ? 'success' : passed === false ? 'error' : 'default'" size="small">
           {{ passed === true ? '校验通过' : passed === false ? '校验未通过' : '校验结果' }}
         </a-tag>
-        <span class="summary-text">{{ summary }}</span>
-        <span v-if="displayIssueCount > 0" class="issue-count">
-          {{ displayIssueCount }} 个问题
+        <span class="summary-text">{{ statusSummaryText }}</span>
+        <span v-if="displayIssueCount > 0 || displayWarningCount > 0" class="issue-count">
+          {{ displayIssueCount > 0 ? `${displayIssueCount} 个错误` : '' }}
+          {{ displayWarningCount > 0 ? `${displayWarningCount} 个警告` : '' }}
         </span>
       </div>
       <div class="header-right">
@@ -181,8 +206,13 @@ const toggleBuildLog = () => {
       </div>
 
       <!-- 无问题提示 -->
-      <div v-if="passed === true && issues.length === 0" class="no-issues">
+      <div v-if="passed === true && issues.length === 0 && displayIssueCount === 0 && displayWarningCount === 0" class="no-issues">
         <a-result status="success" title="校验通过，没有发现问题" />
+      </div>
+
+      <!-- 有警告但无错误 -->
+      <div v-if="passed === true && displayWarningCount > 0 && displayIssueCount === 0" class="warning-only">
+        <a-alert type="warning" :message="`校验通过，但存在 ${displayWarningCount} 个警告`" show-icon />
       </div>
     </div>
   </div>
@@ -349,5 +379,9 @@ const toggleBuildLog = () => {
 
 .no-issues {
   padding: 16px 0;
+}
+
+.warning-only {
+  padding: 8px 0;
 }
 </style>

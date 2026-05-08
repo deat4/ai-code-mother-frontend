@@ -20,6 +20,9 @@ import VersionList from '@/components/VersionList.vue'
 import VersionDiff from '@/components/VersionDiff.vue'
 import TaskStatusCard from '@/components/TaskStatusCard.vue'
 import ValidationResultPanel from '@/components/ValidationResultPanel.vue'
+import TaskStageTimeline from '@/components/TaskStageTimeline.vue'
+import RepairResultPanel from '@/components/RepairResultPanel.vue'
+import TaskDetailDrawer from '@/components/TaskDetailDrawer.vue'
 import hljs from 'highlight.js'
 import {
   TaskStatus,
@@ -28,6 +31,7 @@ import {
   normalizeTaskStage,
   type TaskInfo,
   type ValidationResult,
+  type RepairResult,
 } from '@/types/task'
 
 const route = useRoute()
@@ -84,7 +88,9 @@ const currentSessionId = ref<string | null>(null) // 当前生成会话 ID
 // 任务状态相关（最小侵入式新增）
 const currentTaskInfo = ref<TaskInfo | undefined>(undefined) // 当前任务信息
 const currentValidationResult = ref<ValidationResult | undefined>(undefined) // 校验结果
+const currentRepairResult = ref<RepairResult | undefined>(undefined) // 修复结果
 const isStoppingTask = ref(false) // 是否正在停止任务
+const isTaskDetailDrawerOpen = ref(false) // 任务详情抽屉是否打开
 
 // 预览相关
 const showPreview = ref(false)
@@ -182,7 +188,9 @@ const resetState = () => {
   // 重置任务状态（最小侵入式新增）
   currentTaskInfo.value = undefined
   currentValidationResult.value = undefined
+  currentRepairResult.value = undefined
   isStoppingTask.value = false
+  isTaskDetailDrawerOpen.value = false
   // 重置可视化编辑器状态
   clearSelectedElement()
   clearEditedElement()
@@ -330,6 +338,8 @@ const applyEditDirectly = async () => {
         if (trimmedLine.startsWith('event:task_created')) continue
         if (trimmedLine.startsWith('event:stage_changed')) continue
         if (trimmedLine.startsWith('event:validation_result')) continue
+        if (trimmedLine.startsWith('event:repair_started')) continue
+        if (trimmedLine.startsWith('event:repair_result')) continue
 
         if (trimmedLine.startsWith('data:')) {
           const data = trimmedLine.slice(5).trim()
@@ -361,7 +371,11 @@ const applyEditDirectly = async () => {
                 validationSummary: existingTask.validationSummary,
                 validationPassed: existingTask.validationPassed,
                 issueCount: existingTask.issueCount,
+                warningCount: existingTask.warningCount,
                 buildResult: existingTask.buildResult,
+                repairCount: existingTask.repairCount,
+                maxRepairCount: existingTask.maxRepairCount,
+                repairSummary: existingTask.repairSummary,
               }
               continue
             }
@@ -376,12 +390,79 @@ const applyEditDirectly = async () => {
                 buildResult: parsed.buildResult,
               }
               if (parsed.passed === false && currentTaskInfo.value) {
+                const existingTask = currentTaskInfo.value
                 currentTaskInfo.value = {
-                  ...currentTaskInfo.value,
+                  taskId: existingTask.taskId,
+                  sessionId: existingTask.sessionId,
+                  status: existingTask.status,
+                  currentStage: existingTask.currentStage,
+                  errorMessage: existingTask.errorMessage,
                   validationPassed: false,
                   validationSummary: parsed.summary,
                   issueCount: parsed.issues?.length ?? 0,
+                  warningCount: parsed.warningCount,
                   buildResult: parsed.buildResult,
+                  repairCount: existingTask.repairCount,
+                  maxRepairCount: existingTask.maxRepairCount,
+                  repairSummary: existingTask.repairSummary,
+                }
+              }
+              continue
+            }
+            // 处理 repair_started 数据（最小侵入式新增）
+            if (parsed.repairRound !== undefined && parsed.taskId !== undefined) {
+              currentRepairResult.value = {
+                taskId: parsed.taskId,
+                repairRound: parsed.repairRound,
+                maxRepairRounds: parsed.maxRepairRounds,
+                attempted: true,
+                summary: parsed.summary,
+              }
+              if (currentTaskInfo.value && currentTaskInfo.value.taskId === parsed.taskId) {
+                currentTaskInfo.value = {
+                  taskId: currentTaskInfo.value.taskId,
+                  sessionId: currentTaskInfo.value.sessionId,
+                  status: currentTaskInfo.value.status,
+                  currentStage: TaskStage.REPAIRING,
+                  errorMessage: currentTaskInfo.value.errorMessage,
+                  validationSummary: currentTaskInfo.value.validationSummary,
+                  validationPassed: currentTaskInfo.value.validationPassed,
+                  issueCount: currentTaskInfo.value.issueCount,
+                  warningCount: currentTaskInfo.value.warningCount,
+                  buildResult: currentTaskInfo.value.buildResult,
+                  repairCount: parsed.repairRound,
+                  maxRepairCount: parsed.maxRepairRounds,
+                  repairSummary: parsed.summary,
+                }
+              }
+              continue
+            }
+            // 处理 repair_result 数据（最小侵入式新增）
+            if (parsed.success !== undefined && parsed.taskId !== undefined && parsed.repairRound !== undefined) {
+              currentRepairResult.value = {
+                taskId: parsed.taskId,
+                repairRound: parsed.repairRound,
+                maxRepairRounds: parsed.maxRepairRounds,
+                attempted: parsed.attempted ?? true,
+                success: parsed.success,
+                summary: parsed.summary,
+                skippedReason: parsed.skippedReason,
+              }
+              if (currentTaskInfo.value && currentTaskInfo.value.taskId === parsed.taskId) {
+                currentTaskInfo.value = {
+                  taskId: currentTaskInfo.value.taskId,
+                  sessionId: currentTaskInfo.value.sessionId,
+                  status: currentTaskInfo.value.status,
+                  currentStage: currentTaskInfo.value.currentStage,
+                  errorMessage: currentTaskInfo.value.errorMessage,
+                  validationSummary: currentTaskInfo.value.validationSummary,
+                  validationPassed: currentTaskInfo.value.validationPassed,
+                  issueCount: currentTaskInfo.value.issueCount,
+                  warningCount: currentTaskInfo.value.warningCount,
+                  buildResult: currentTaskInfo.value.buildResult,
+                  repairCount: parsed.repairRound,
+                  maxRepairCount: parsed.maxRepairRounds,
+                  repairSummary: parsed.summary,
                 }
               }
               continue
@@ -704,6 +785,16 @@ const sendMessage = async () => {
           continue
         }
 
+        // 处理 repair_started 事件（最小侵入式新增）
+        if (trimmedLine.startsWith('event:repair_started')) {
+          continue
+        }
+
+        // 处理 repair_result 事件（最小侵入式新增）
+        if (trimmedLine.startsWith('event:repair_result')) {
+          continue
+        }
+
         // 处理 tool_call 事件 - 下一个 data 行包含文件信息
         if (trimmedLine.startsWith('event:tool_call')) {
           continue
@@ -743,7 +834,11 @@ const sendMessage = async () => {
                 validationSummary: existingTask.validationSummary,
                 validationPassed: existingTask.validationPassed,
                 issueCount: existingTask.issueCount,
+                warningCount: existingTask.warningCount,
                 buildResult: existingTask.buildResult,
+                repairCount: existingTask.repairCount,
+                maxRepairCount: existingTask.maxRepairCount,
+                repairSummary: existingTask.repairSummary,
               }
               continue
             }
@@ -759,12 +854,83 @@ const sendMessage = async () => {
               }
               // 如果校验失败，更新任务状态（作为展示兜底）
               if (parsed.passed === false && currentTaskInfo.value) {
+                const existingTask = currentTaskInfo.value
                 currentTaskInfo.value = {
-                  ...currentTaskInfo.value,
+                  taskId: existingTask.taskId,
+                  sessionId: existingTask.sessionId,
+                  status: existingTask.status,
+                  currentStage: existingTask.currentStage,
+                  errorMessage: existingTask.errorMessage,
                   validationPassed: false,
                   validationSummary: parsed.summary,
                   issueCount: parsed.issues?.length ?? 0,
+                  warningCount: parsed.warningCount,
                   buildResult: parsed.buildResult,
+                  repairCount: existingTask.repairCount,
+                  maxRepairCount: existingTask.maxRepairCount,
+                  repairSummary: existingTask.repairSummary,
+                }
+              }
+              continue
+            }
+            // 处理 repair_started 数据（最小侵入式新增）
+            if (parsed.repairRound !== undefined && parsed.taskId !== undefined) {
+              currentRepairResult.value = {
+                taskId: parsed.taskId,
+                repairRound: parsed.repairRound,
+                maxRepairRounds: parsed.maxRepairRounds,
+                attempted: true,
+                summary: parsed.summary,
+              }
+              // 更新任务状态为 REPAIRING 阶段
+              if (currentTaskInfo.value && currentTaskInfo.value.taskId === parsed.taskId) {
+                const existingTask = currentTaskInfo.value
+                currentTaskInfo.value = {
+                  taskId: existingTask.taskId,
+                  sessionId: existingTask.sessionId,
+                  status: existingTask.status,
+                  currentStage: TaskStage.REPAIRING,
+                  errorMessage: existingTask.errorMessage,
+                  validationSummary: existingTask.validationSummary,
+                  validationPassed: existingTask.validationPassed,
+                  issueCount: existingTask.issueCount,
+                  warningCount: existingTask.warningCount,
+                  buildResult: existingTask.buildResult,
+                  repairCount: parsed.repairRound,
+                  maxRepairCount: parsed.maxRepairRounds,
+                  repairSummary: parsed.summary,
+                }
+              }
+              continue
+            }
+            // 处理 repair_result 数据（最小侵入式新增）
+            if (parsed.success !== undefined && parsed.taskId !== undefined && parsed.repairRound !== undefined) {
+              currentRepairResult.value = {
+                taskId: parsed.taskId,
+                repairRound: parsed.repairRound,
+                maxRepairRounds: parsed.maxRepairRounds,
+                attempted: parsed.attempted ?? true,
+                success: parsed.success,
+                summary: parsed.summary,
+                skippedReason: parsed.skippedReason,
+              }
+              // 更新任务状态中的修复信息
+              if (currentTaskInfo.value && currentTaskInfo.value.taskId === parsed.taskId) {
+                const existingTask = currentTaskInfo.value
+                currentTaskInfo.value = {
+                  taskId: existingTask.taskId,
+                  sessionId: existingTask.sessionId,
+                  status: existingTask.status,
+                  currentStage: existingTask.currentStage,
+                  errorMessage: existingTask.errorMessage,
+                  validationSummary: existingTask.validationSummary,
+                  validationPassed: existingTask.validationPassed,
+                  issueCount: existingTask.issueCount,
+                  warningCount: existingTask.warningCount,
+                  buildResult: existingTask.buildResult,
+                  repairCount: parsed.repairRound,
+                  maxRepairCount: parsed.maxRepairRounds,
+                  repairSummary: parsed.summary,
                 }
               }
               continue
@@ -1373,6 +1539,13 @@ onUnmounted(() => {
         </div>
 
         <div class="input-section">
+          <!-- 阶段时间线（最小侵入式新增） -->
+          <TaskStageTimeline
+            v-if="currentTaskInfo"
+            :task-info="currentTaskInfo"
+            :code-gen-type="app?.codeGenType"
+          />
+
           <!-- 任务状态卡片（最小侵入式新增） -->
           <TaskStatusCard
             v-if="currentTaskInfo"
@@ -1381,6 +1554,7 @@ onUnmounted(() => {
             :is-stopping="isStoppingTask"
             @stop="handleStopGeneration"
             @refresh="refreshTaskStatus"
+            @view-logs="isTaskDetailDrawerOpen = true"
           />
 
           <!-- 校验结果面板（最小侵入式新增） -->
@@ -1388,7 +1562,23 @@ onUnmounted(() => {
             v-if="currentValidationResult || currentTaskInfo?.validationSummary"
             :validation-result="currentValidationResult"
             :issue-count="currentTaskInfo?.issueCount"
+            :warning-count="currentTaskInfo?.warningCount"
             :build-result="currentTaskInfo?.buildResult"
+          />
+
+          <!-- 自动修复结果面板（最小侵入式新增） -->
+          <RepairResultPanel
+            v-if="currentRepairResult || currentTaskInfo?.repairSummary"
+            :repair-result="currentRepairResult"
+            :task-info="currentTaskInfo"
+          />
+
+          <!-- 任务详情抽屉（最小侵入式新增） -->
+          <TaskDetailDrawer
+            v-model:open="isTaskDetailDrawerOpen"
+            :task-info="currentTaskInfo"
+            :validation-result="currentValidationResult"
+            :repair-result="currentRepairResult"
           />
 
           <!-- 选中元素信息展示（单选模式） -->

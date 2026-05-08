@@ -104,6 +104,23 @@ const validationPassed = computed(() => {
 const showErrorMessage = computed(() => {
   return normalizedStatus.value === TaskStatus.FAILED && props.taskInfo?.errorMessage
 })
+
+// 任务摘要（综合展示）
+const taskSummaryText = computed(() => {
+  // 优先使用校验摘要
+  if (props.taskInfo?.validationSummary) {
+    return props.taskInfo.validationSummary
+  }
+  // 其次使用修复摘要
+  if (props.taskInfo?.repairSummary) {
+    return props.taskInfo.repairSummary
+  }
+  // 再次使用错误信息
+  if (props.taskInfo?.errorMessage) {
+    return props.taskInfo.errorMessage
+  }
+  return ''
+})
 </script>
 
 <template>
@@ -125,11 +142,19 @@ const showErrorMessage = computed(() => {
         <a-button v-if="!isRunning" type="link" size="small" @click="emit('refresh')">
           刷新
         </a-button>
+        <a-button type="link" size="small" @click="emit('viewLogs')">
+          详情
+        </a-button>
       </div>
     </div>
 
-    <!-- 校验摘要 -->
-    <div v-if="showValidationSummary" class="validation-summary">
+    <!-- 任务摘要 -->
+    <div v-if="taskSummaryText" class="task-summary">
+      <span class="summary-text">{{ taskSummaryText }}</span>
+    </div>
+
+    <!-- 校验结果提示 -->
+    <div v-if="showValidationSummary && !taskSummaryText" class="validation-summary">
       <a-tag :color="validationPassed === true ? 'success' : validationPassed === false ? 'error' : 'default'" size="small">
         {{ validationPassed === true ? '校验通过' : validationPassed === false ? '校验未通过' : '校验结果' }}
       </a-tag>
@@ -186,16 +211,21 @@ const showErrorMessage = computed(() => {
   gap: 4px;
 }
 
-.validation-summary {
+.task-summary {
   margin-top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .summary-text {
   font-size: 12px;
   color: #666;
+  line-height: 1.5;
+}
+
+.validation-summary {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .error-message {

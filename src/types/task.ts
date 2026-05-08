@@ -19,6 +19,7 @@ export enum TaskStage {
   GENERATING = 'GENERATING',
   VALIDATING = 'VALIDATING',
   BUILDING = 'BUILDING',
+  REPAIRING = 'REPAIRING',
   SCREENSHOT = 'SCREENSHOT',
   DONE = 'DONE',
 }
@@ -40,6 +41,7 @@ const STAGE_MAP: Record<string, TaskStage> = {
   generating: TaskStage.GENERATING,
   validating: TaskStage.VALIDATING,
   building: TaskStage.BUILDING,
+  repairing: TaskStage.REPAIRING,
   screenshot: TaskStage.SCREENSHOT,
   done: TaskStage.DONE,
 }
@@ -102,6 +104,19 @@ export interface ValidationResult {
 }
 
 /**
+ * 自动修复结果信息
+ */
+export interface RepairResult {
+  taskId?: number | string
+  repairRound?: number
+  maxRepairRounds?: number
+  attempted?: boolean
+  success?: boolean
+  summary?: string
+  skippedReason?: string
+}
+
+/**
  * 任务信息
  */
 export interface TaskInfo {
@@ -113,7 +128,11 @@ export interface TaskInfo {
   validationSummary?: string
   validationPassed?: boolean
   issueCount?: number
+  warningCount?: number
   buildResult?: BuildResult
+  repairCount?: number
+  maxRepairCount?: number
+  repairSummary?: string
 }
 
 /**
@@ -145,6 +164,7 @@ export const TASK_STAGE_TEXT: Record<TaskStage, string> = {
   [TaskStage.GENERATING]: '正在生成代码',
   [TaskStage.VALIDATING]: '正在校验结果',
   [TaskStage.BUILDING]: '正在构建项目',
+  [TaskStage.REPAIRING]: '正在自动修复',
   [TaskStage.SCREENSHOT]: '正在生成截图',
   [TaskStage.DONE]: '任务完成',
 }
@@ -168,6 +188,36 @@ export const TASK_STAGE_COLOR: Record<TaskStage, string> = {
   [TaskStage.GENERATING]: 'processing',
   [TaskStage.VALIDATING]: 'processing',
   [TaskStage.BUILDING]: 'processing',
+  [TaskStage.REPAIRING]: 'processing',
   [TaskStage.SCREENSHOT]: 'processing',
   [TaskStage.DONE]: 'success',
+}
+
+/**
+ * 任务阶段顺序（用于时间线展示）
+ * 注意：REPAIRING 只在校验失败后出现，不固定顺序
+ */
+export const TASK_STAGE_ORDER: TaskStage[] = [
+  TaskStage.INIT,
+  TaskStage.GENERATING,
+  TaskStage.VALIDATING,
+  TaskStage.BUILDING,
+  TaskStage.DONE,
+]
+
+/**
+ * 获取阶段在时间线中的位置索引
+ */
+export function getStageIndex(stage?: TaskStage): number {
+  if (!stage) return -1
+  return TASK_STAGE_ORDER.indexOf(stage)
+}
+
+/**
+ * 判断阶段是否已完成（在当前阶段之前）
+ */
+export function isStageCompleted(stage: TaskStage, currentStage?: TaskStage): boolean {
+  const currentIndex = getStageIndex(currentStage)
+  const stageIndex = getStageIndex(stage)
+  return stageIndex !== -1 && currentIndex !== -1 && stageIndex < currentIndex
 }

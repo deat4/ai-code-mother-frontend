@@ -1,8 +1,6 @@
-// @ts-ignore
-/* eslint-disable */
 import request from '@/utils/request'
 import type { AxiosResponse } from 'axios'
-import type { TaskInfo, TaskLogEntry, ValidationResult } from '@/types/task'
+import type { TaskInfo, TaskLogEntry, ValidationResult, RepairResult } from '@/types/task'
 
 /**
  * 任务查询响应类型（后端返回结构）
@@ -16,6 +14,7 @@ interface TaskResponse {
   validationSummary?: string
   validationPassed?: boolean
   issueCount?: number
+  warningCount?: number
   buildResult?: {
     installSuccess?: boolean
     buildSuccess?: boolean
@@ -27,6 +26,9 @@ interface TaskResponse {
     installDurationMs?: number
     buildDurationMs?: number
   }
+  repairCount?: number
+  maxRepairCount?: number
+  repairSummary?: string
 }
 
 /**
@@ -90,6 +92,10 @@ export function parseTaskResponse(response: TaskResponse): TaskInfo {
     validationSummary: response.validationSummary,
     validationPassed: response.validationPassed,
     issueCount: response.issueCount,
+    warningCount: response.warningCount,
     buildResult: response.buildResult,
+    repairCount: response.repairCount,
+    maxRepairCount: response.maxRepairCount,
+    repairSummary: response.repairSummary,
   }
 }
